@@ -1,5 +1,8 @@
+import base
+import election
 import hashlib
 import os
+from copy import deepcopy
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
@@ -48,8 +51,8 @@ def verify_signature(message, signature, public_key):
         return True
     except InvalidSignature:
         print('Invalid Signature!')
-    except Exception as e:
-        print('Unexpected error: {}'.format(e))
+    except Exception:
+        print('Some other error; investigate')
     return False
 
 
@@ -66,7 +69,7 @@ def get_input_of_type(message, expected_type, allowed_inputs=None):
     Args:
         message             message to display to prompt user for input
         expected_type       type of input expected
-        allowed_inputs      iterable of allowed input values
+        allowed_inputs      iterable of allowed inputs (the value rather than the type)
     """
     while True:
         try:
@@ -77,7 +80,7 @@ def get_input_of_type(message, expected_type, allowed_inputs=None):
                 print('Unexpected input')
                 continue
             break
-        except (ValueError, TypeError):
+        except:
             print("Wrong type of input")
     return user_input
 

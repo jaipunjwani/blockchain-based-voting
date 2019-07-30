@@ -147,7 +147,7 @@ class VotingProgram:
         for voting_computer in self.voting_computers:
             voting_computer.set_ballot_generator(self.ballot_generator)
 
-        # read in voter roll from file
+        # TODO: read in voter roll from file; assign incrementing voter ID
         voter_roll_file = '/'
         print('Extracted voter roll from {}'.format(voter_roll_file))
         self.voter_roll = [Voter('Mateusz Gembarzewski', '1'),
@@ -158,6 +158,7 @@ class VotingProgram:
         print('Voter registration closed. Generating {} ballots'.format(len(self.voter_roll)))
         ballots = self.ballot_generator.generate_ballots(election, items, num_ballots=len(self.voter_roll))
 
+        # TODO: make id a simple incrementer?
         # ensure that ballot IDs are unique by adding all IDs to a master set & checking that set length = ballot list length
         ballot_ids = set()
         for ballot in ballots:
@@ -166,9 +167,11 @@ class VotingProgram:
         if len(ballot_ids) != len(ballots):
             raise Exception("Generated non-unique ballot")
 
+        # TODO: make paper trail configurable for paper-based system
         # holds filled out ballots.
         self.paper_trail = []
 
+        # TODO: eliminate ledger; instead, count blocks on the fly
         # initialize ledgers
         voter_ledger = base.VoterLedger(self.voter_roll)
         vote_ledger = base.VoteLedger(ballots)
@@ -208,10 +211,12 @@ class VotingProgram:
         time.sleep(2)
         
         # print out paper trail results for comparison
+        '''
         paper_tally_results = Ballot.tally(self.paper_trail)
         print('\nPaper Trail Results:')
         for key in paper_tally_results:
             print(key, ": ", paper_tally_results[key])
+        '''
 
     def print_menu(self):
         if self.adversarial_mode:
@@ -228,7 +233,7 @@ class VotingProgram:
         print("(5) exit")
         print()
 
-    def handle_input(self, menu_number):
+    def handle_menu_option(self, menu_number):
         """Redirects user to appropriate method and returns whether or not program should exit.
         Args:
             menu_number         menu option to be used for redirection
