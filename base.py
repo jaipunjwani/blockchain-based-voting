@@ -1,4 +1,4 @@
-
+from copy import deepcopy
 
 class Node:
     """Abstract class for Node that participates in a blockchain"""
@@ -127,6 +127,10 @@ class VoterAuthenticationBooth(Node):
 
 class VotingComputer(Node):
     """Voting computer which is also a node in the ballot blockchain."""
+
+    def __init__(self, ballot, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ballot = deepcopy(ballot)
 
 
 class Transaction:

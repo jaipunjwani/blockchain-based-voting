@@ -8,25 +8,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 MINIMUM_AGREEMENT_PCT = 0.8  # required consensus for blockchain approval
 
-# ballot for a single election, in this case U.S. Federal Election
-ballot = [
-    # a ballot can have multiple ballot items (1 per position)
-    {
-     'position': 'President', 
-     'description': 'Head of executive branch', 
-     'choices': ['Obama (D)', 'Bloomberg (R)'],
-     'max_choices': 1,
-     'chosen': []
-    },
-    {
-     'position': 'Vice President',
-     'description': 'Executive ranked right below the president',
-     'choices': ['Joe Biden (D)', 'Bradley Tusk (R)'],
-     'max_choices': 1,
-     'chosen': []
-    }
-]
-
 class Ballot:
     """Ballot for a specific election that can have many ballot items."""
 
@@ -43,19 +24,45 @@ class Ballot:
         self.items[position] = {
             'description': description,
             'choices': choices,
-            'max_choices': max_choices
+            'max_choices': max_choices,
             'selected': []  # tracks selected choices
         }
 
-    def print(self):
+    def fill_out(self):
+        # TODO: review
         print("Ballot for {}".format(self.election))
         for position in self.items:
             metadata = self.items[position]
             print ("{}: {}".format(position, metadata['description']))
-            print ("You may select up to {} of the following choices: ".format(metadata['max_choices']))
             for num, choice in enumerate(metadata['choices']):
-                print ("{}. {}".format(num, choice))
-            print("Please ")
+                print ("{}. {}".format(num+1, choice))
+            user_input = input(
+                "Please enter your choice numbers, separated by commas (no more than {} selections): ".format(
+                    metadata['max_choices']
+                )
+            )
+            user_input = user_input.split(",")
+            selections = []
+            for selection in user_input:
+                try:
+                    candidate = metadata['choices'][int(selection)-1]
+                    selections.append(int(selection)-1)
+                except ValueError:
+                    pass
+                except IndexError:
+                    pass
+            if len(selections) == 0:
+                pass # need more valid selections
+            if len(selections) > metadata['max_choices']:
+                pass # too many choices
+            print("Your valid selections: {}".format(selections))
+            confirmation = utils.get_input_of_type(
+                "Enter 'y' to confirm choices or 'n' to clear ballot",
+                str, allowed_inputs=['y', 'n', 'Y', 'N']
+            ).lower()
+            if confirmation == 'n':
+                self.clear()
+                return
 
 
     def select(self, position, selected):
@@ -71,7 +78,7 @@ class Ballot:
 
     def finalize(self):
         """Finalizes ballot items."""
-        self.finalized = true
+        self.finalized = True
 
 
 def create_nodes(NodeClass, *additional_args, num_nodes=0, is_adversary=False):
@@ -101,13 +108,29 @@ class VotingProgram:
     path = 'voter_roll.txt'
 
     def setup(self, adversarial_mode=False):
+        # set up election with ballot template
+        self.ballot = Ballot(election='U.S. 2020 Federal Election')
+        self.ballot.add_item(
+            position='President', 
+            description='Head of executive branch', 
+            choices=['Obama(D)', 'Bloomberg(R)'], 
+            max_choices=1
+        )
+        self.ballot.add_item(
+            position='Vice President',
+            description='Executive right below President',
+            choices=['Joe Biden(D)', 'Bradley Tusk(R)'],
+            max_choices=1
+        )
+        self.ballot.finalize()
+
         # read voter roll from file
         voter_roll = self.load_voter_roll()
 
         # initialize nodes
         num_nodes = 50
         self.voting_computers = create_nodes(
-            VotingComputer, num_nodes=num_nodes
+            VotingComputer, self.ballot, num_nodes=num_nodes
         )
         self.voter_authentication_booths = create_nodes(
             VoterAuthenticationBooth, voter_roll, num_nodes=num_nodes
@@ -123,7 +146,6 @@ class VotingProgram:
             node.set_node_mapping(copy(voter_auth_nodes_pki))
 
         
-
         # initialize blockchain with appropriate content
 
     def begin_program(self):
@@ -152,7 +174,10 @@ class VotingProgram:
 
         # vote
         voting_computer = random.choice(self.voting_computers)
-        
+
+        # print ballot
+        self.ballot.fill_out()
+
     def load_voter_roll(self):
         voter_roll = dict()
         voter_id = 1
