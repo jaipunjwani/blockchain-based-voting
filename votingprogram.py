@@ -42,19 +42,22 @@ class Ballot:
                 )
             )
             user_input = user_input.split(",")
-            selections = []
+            selection_indexes = []
             for selection in user_input:
                 try:
                     candidate = metadata['choices'][int(selection)-1]
-                    selections.append(int(selection)-1)
-                except ValueError:
-                    pass
-                except IndexError:
-                    pass
-            if len(selections) == 0:
+                    selection_indexes.append(int(selection)-1)
+                except (IndexError, ValueError):
+                    retry = True
+
+            if not selection_indexes:
+                retry = True
                 pass # need more valid selections
-            if len(selections) > metadata['max_choices']:
+            if len(selection_indexes) > metadata['max_choices']:
+                retry = True
                 pass # too many choices
+
+            selections = [metadata['choices'][i] for i in selection_indexes]
             print("Your valid selections: {}".format(selections))
             confirmation = utils.get_input_of_type(
                 "Enter 'y' to confirm choices or 'n' to clear ballot",
