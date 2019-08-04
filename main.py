@@ -13,8 +13,9 @@ def main():
         allowed_inputs={-1,1}
     )
     adversarial_mode = True if mode == -1 else False
+    print("Setting up election...")
     program.setup(adversarial_mode=adversarial_mode)
-    input('Set up complete. Press enter to begin election')
+    input('Set up complete. Press enter to begin election\n')
     program.begin_program()
 
 
