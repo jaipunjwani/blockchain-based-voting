@@ -1,4 +1,8 @@
+from datetime import datetime, timedelta
 from copy import deepcopy
+from constants import *
+import utils
+import random
 
 class Node:
     """Abstract class for Node that participates in a blockchain"""
@@ -30,7 +34,7 @@ class Node:
         Returns boolean indicating success."""
         pass
 
-    def broadcast_transactions(self, transactions):
+    def broadcast_transactions(self, *transactions):
         """Broadcasts transactions to other nodes"""
         for node in self.node_mapping.values():
             for tx in transactions:
@@ -109,6 +113,35 @@ class Node:
         return utils.sign(message, self._private_key)
 
 
+class BallotClaimTicket:
+    """Ticket issued after voter authenticates """
+
+    DURATION = timedelta(minutes=5)
+
+    def __init__(self, node, num_ballots=1):
+        self.id = str(random.getrandbits(128))  # assign a random ID to the ballot
+        self.node = node
+        self.num_ballots = num_ballots
+        self.issued = datetime.now()
+        self.signature = self.node.sign_message(self.id)
+
+    def get_signature_contents(self, **signature_kwargs):
+        return self.id
+
+    @property
+    def expired(self):
+        return datetime.now() >= self.issued + self.DURATION
+
+    @staticmethod
+    def is_valid(ticket):
+        if not utils.verify_signature(
+            ticket.get_signature_contents(),
+            ticket.signature, 
+            ticket.node.public_key) or ticket.expired:
+            return False
+        return True
+
+
 class VoterAuthenticationBooth(Node):
     """Voter Registration Authority / Node responsible for authenticating voter
     and creating transactions on VoterBlockchain."""
@@ -116,13 +149,34 @@ class VoterAuthenticationBooth(Node):
     def __init__(self, voter_roll, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.voter_roll = voter_roll
+        self.voter_roll_index = {voter.id:voter for voter in self.voter_roll}
 
-    def authenticate_voter(self, voter):
-        return True if voter in self.voter_roll.values() else False
+    def authenticate_voter(self, voter_id):
+        return True if voter_id in self.voter_roll_index else False
 
-    def can_voter_vote(self, voter):
-        return self.authenticate_voter(voter)
+    def can_voter_vote(self, voter_id):
+        return self.authenticate_voter(voter_id)
         # TODO: add logic for checking if voter has voted
+
+    def validate_transaction(self, transaction):
+        valid = super().validate_transaction(transaction)
+        if not valid:
+            return valid
+
+        # TODO: check blockchain then current txs for violations
+        return True
+
+    def generate_ballot_claim_ticket(self, voter_id):
+        ticket = BallotClaimTicket(self)
+        # TODO: increase global counter
+        self.create_transaction(self.voter_roll_index[voter_id])
+        return ticket
+
+    def create_transaction(self, voter):
+        # TODO: voter class?
+        tx = VoterTransaction(voter, self, NOT_RETRIEVED_BALLOT, RETRIEVED_BALLOT)
+        self.verified_transactions.add(tx)
+        self.broadcast_transactions(tx)
 
 
 class VotingComputer(Node):
@@ -130,7 +184,36 @@ class VotingComputer(Node):
 
     def __init__(self, ballot, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.ballot = deepcopy(ballot)
+        self.ballot = ballot
+
+    def get_ballot(self):
+        """Returns new ballot"""
+        return deepcopy(self.ballot)
+
+    def create_transaction(self, ballot_claim_ticket, ballot):
+        # TODO: add ballot claim ticket to transaction
+        # TODO: take in ballot from user
+        signature_kwargs = dict()
+        tx = BallotTransaction(
+            ballot_claim_ticket, ballot, self, BALLOT_CREATED, BALLOT_USED, 
+            **signature_kwargs
+        )
+        self.verified_transactions.add(tx)
+        # TODO: update global counters
+        self.broadcast_transactions(tx)
+
+    def vote(self, ballot_claim_ticket):
+        ballot = self.get_ballot()
+        ballot_filled_out = ballot.fill_out()
+        if ballot_filled_out:
+            self.create_transaction(ballot_claim_ticket, ballot)
+
+    def validate_transaction(self, transaction):
+        valid = super().validate_transaction(transaction)
+        if not valid:
+            return valid
+        # TODO: check 
+        return True
 
 
 class Transaction:
@@ -139,7 +222,6 @@ class Transaction:
     """
 
     allowed_states = None  # defines valid states for the content of the transaction
-    content_class = None   # defines the expected class of the content
     timestamped = True     # by default, all Transactions are timestamped
 
     def __init__(self, content, node, previous_state, new_state, timestamped=timestamped, **signature_kwargs):
@@ -157,8 +239,6 @@ class Transaction:
             AttributeError:     if content object not implement `get_signature_contents` method
             Exception:          if either old or new state is not in the `allowed_states`
         """
-        if type(content) is not self.content_class:
-            raise TypeError('Unexpected transaction content!')
         if getattr(content, 'get_signature_contents') is None:
             raise AttributeError(str(content_class) + ' needs to implement method get_signature_contents')
         self.content = content
@@ -171,7 +251,7 @@ class Transaction:
         self.node = node
         self.timestamped = timestamped
         if timestamped:
-            self.time = datetime.datetime.now()
+            self.time = datetime.now()
         self.signature = node.sign_message(self.get_signature_contents(**self.signature_kwargs))
 
     def __str__(self):
@@ -210,3 +290,22 @@ class Transaction:
             transaction         transaction to be validated
         """
         return utils.verify_signature(transaction.get_signature_contents(**transaction.signature_kwargs), transaction.signature, transaction.node.public_key)
+
+
+class BallotTransaction(Transaction):
+    allowed_states = [BALLOT_CREATED, BALLOT_USED]
+
+    def __init__(self, ballot_claim_ticket, *args, **kwargs):
+        self.ballot_claim_ticket = ballot_claim_ticket
+        super().__init__(*args, **kwargs)
+
+    def get_signature_contents(self, **signature_kwargs):
+        signature_contents = super().get_signature_contents(**signature_kwargs)
+        return ":".join([
+            signature_contents, 
+            self.ballot_claim_ticket.get_signature_contents(**signature_kwargs)
+        ])
+
+
+class VoterTransaction(Transaction):
+    allowed_states = [NOT_RETRIEVED_BALLOT, RETRIEVED_BALLOT]

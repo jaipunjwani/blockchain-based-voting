@@ -8,6 +8,19 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 MINIMUM_AGREEMENT_PCT = 0.8  # required consensus for blockchain approval
 
+class Voter:
+
+    def __init__(self, voter_id, name):
+        self.id = str(voter_id)
+        self.name = name
+
+    def __repr__(self):
+        return self.name
+
+    def get_signature_contents(self, **kwargs):
+        return "{}:{}".format(str(self.id), self.name)
+
+
 class Ballot:
     """Ballot for a specific election that can have many ballot items."""
 
@@ -16,16 +29,20 @@ class Ballot:
         self.items = dict()
         self.finalized = False
 
+    def get_signature_contents(self, **kwargs):
+        """Returns unique representation of Ballot"""
+        return self.election + str(self.items)
+
     def add_item(self, position, description, choices, max_choices):
         if self.finalized:
-            return;
+            return
 
-        # one position per election
+        # one unique position per election
         self.items[position] = {
             'description': description,
             'choices': choices,
             'max_choices': max_choices,
-            'selected': []  # tracks selected choices
+            'selected': []  # tracks index(es) of selected choices
         }
 
     def fill_out(self):
@@ -43,10 +60,10 @@ class Ballot:
                     max_choices
                 )
             else:
-                msg = "Please enter your choice number."
+                msg = "Please enter your choice number: "
 
             user_input = input(msg)
-            user_input = user_input.split(",")
+            user_input = user_input.split(",")[:max_choices]  # cap at max_choices
             selection_indexes = []
             for selection in user_input:
                 try:
@@ -69,13 +86,17 @@ class Ballot:
                 "Enter 'y' to confirm choices or 'n' to clear ballot ",
                 str, allowed_inputs=['y', 'n', 'Y', 'N']
             ).lower()
+            print()
             if confirmation == 'n':
                 retry = True # ?
                 self.clear()
-                return
+                return False
+            else:
+                self.select(position, selection_indexes)
+        return True    
 
     def select(self, position, selected):
-        pass
+        self.items[position]['selected'] = selected
 
     def unselect(self, position, selected):
         pass
@@ -88,6 +109,10 @@ class Ballot:
     def finalize(self):
         """Finalizes ballot items."""
         self.finalized = True
+
+    @staticmethod
+    def tally(ballots):
+        pass
 
 
 def create_nodes(NodeClass, *additional_args, num_nodes=0, is_adversary=False):
@@ -154,18 +179,10 @@ class VotingProgram:
         for node in self.voter_authentication_booths:
             node.set_node_mapping(copy(voter_auth_nodes_pki))
 
-        
         # initialize blockchain with appropriate content
 
     def begin_program(self):
-        # TODO: display menu and control program flow
-        '''
-        utils.clear_screen()
-        self.display_header()
-        self.display_menu()
-        choice = utils.get_input_of_type("Enter in an option: ", int)
-        '''
-        continue_program = True#self.handle_menu_choice(choice)
+        continue_program = True
 
         while continue_program:
             utils.clear_screen()
@@ -189,7 +206,7 @@ class VotingProgram:
 
     def display_menu(self):
         print ("(1) Vote")
-        print ("(2) View voter roll")
+        print ("(2) Lookup voter id")
         print ("(3) View current results")
         print ("(4) View logs")
         print ("(5) Exit")
@@ -202,7 +219,7 @@ class VotingProgram:
         if choice == 1:
             return self.vote()
         elif choice == 2:
-            print(list(self.voter_roll.values()))
+            self.lookup_voter_id()
         elif choice == 3:
             pass
         elif choice == 4:
@@ -221,38 +238,68 @@ class VotingProgram:
             "Please authenticate yourself by typing in your full name.\n",
             str
         ).lower()
-        authenticated = voter_auth_booth.authenticate_voter(voter)
+        voter_id = None
+
+        voters = self.get_voter_by_id(voter)
+        if len(voters) > 1:
+            voter_id = utils.get_input_of_type(
+                "Multiple matches found for {}. Please enter in your voter id.\n".format(voter),
+                str
+            )
+            if voter_id not in [v.id for v in voters]:
+                print("Please look up your ID and try again.")
+                return True
+        elif len(voters) == 1:
+            voter_id = voters[0]
+
+        authenticated = voter_auth_booth.authenticate_voter(voter_id)
 
         if not authenticated:
             print("{} is not on the voter roll".format(voter))
             return True
 
-        can_vote = voter_auth_booth.can_voter_vote(voter)
+        can_vote = voter_auth_booth.can_voter_vote(voter_id)
         if not can_vote:
             print("{} has already voted!".format(voter))
 
         # retrieve ballot claim ticket
+        ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter_id)
         print("Retrieved ballot claim ticket. Please proceed to the voting booths.\n")
 
         # vote
         voting_computer = random.choice(self.voting_computers)
+        voting_computer.vote(ballot_claim_ticket)
 
-        # print ballot
-        self.ballot.fill_out()
-
-
-        # return False if election is over - all voters have voted
+        # return False if election is over (all voters have voted)
         return True
 
+    def lookup_voter_id(self):
+        name = utils.get_input_of_type(
+                "Type in your full name: ",
+                str
+            ).lower()
+        matches = self.get_voter_by_id(name)
+
+        if not matches:
+            print("No matches found")
+        else:
+            print("Matching ID(s) found: {}".format(
+                [voter.id for voter in matches]
+            ))
+
+    def get_voter_by_id(self, name):
+        return [voter for voter in self.voter_roll if voter.name == name]
+
     def load_voter_roll(self):
-        voter_roll = dict()
+        voter_roll = []
         voter_id = 1
         with open(self.path, 'r') as file:
             for voter in file:
                 voter = voter.strip().lower()  # use lowercase for simplicity
                 if voter:
-                    voter_roll[voter_id] = voter
+                    voter_roll.append(Voter(voter_id, voter))
                     voter_id = voter_id + 1
         print ("Registered voters from {}: {}".format(
-            self.path, list(voter_roll.values())))
-        return voter_roll 
+            self.path, voter_roll)
+        )
+        return voter_roll
