@@ -1,5 +1,6 @@
 import random
 import utils
+import json
 
 from base import VotingComputer, VoterAuthenticationBooth
 from copy import copy, deepcopy
@@ -112,7 +113,27 @@ class Ballot:
 
     @staticmethod
     def tally(ballots):
-        pass
+        """
+        {
+            'president': [{'Obama': 1}, {'Bloomberg': 1}],
+            'vice president': [{'Biden': '1'}, {'Tusk': 1}]
+        }
+        """
+        result = {}
+
+        for ballot in ballots:
+            for position in ballot.items:
+                choices = ballot.items[position]['choices']
+                selected = ballot.items[position]['selected']
+                if position not in result:
+                    result[position] = []
+                    for candidate in choices:
+                        result[position].append({candidate: 0})
+
+                for candidate_index in selected:
+                    candidate = choices[candidate_index]
+                    result[position][candidate_index][candidate] += 1
+        return result
 
 
 def create_nodes(NodeClass, *additional_args, num_nodes=0, is_adversary=False):
@@ -140,6 +161,7 @@ def get_pki(nodes):
 
 class VotingProgram:
     path = 'voter_roll.txt'
+    num_voters_voted = 0
 
     def setup(self, adversarial_mode=False):
         # set up election with ballot template
@@ -179,11 +201,11 @@ class VotingProgram:
         for node in self.voter_authentication_booths:
             node.set_node_mapping(copy(voter_auth_nodes_pki))
 
-        # initialize blockchain with appropriate content
+        # initialize blockchain with appropriate content?
 
     def begin_program(self):
         continue_program = True
-
+    
         while continue_program:
             utils.clear_screen()
             self.display_header()
@@ -191,6 +213,9 @@ class VotingProgram:
             choice = utils.get_input_of_type("Enter in an option: ", int)
             continue_program = self.handle_menu_choice(choice)
             input("Press any key to continue")
+
+        print("Election over! Results: ")
+        self.display_results()
 
     def display_header(self):
         print ("{}".format(self.ballot.election))
@@ -211,6 +236,30 @@ class VotingProgram:
         print ("(4) View logs")
         print ("(5) Exit")
 
+    def display_results(self):
+        # get results from all nodes in ballot blockchain
+        # TODO: check blockchain results first
+        # extract ballot from transactions that have consensus from network
+        transaction_approval_map = {}
+        for node in self.voting_computers:
+            for tx in node.verified_transactions:
+                if tx in transaction_approval_map:
+                    transaction_approval_map[tx] += 1
+                else:
+                    transaction_approval_map[tx] = 1
+
+        approved_transactions = []
+        ballots = []
+        network_size = len(self.voting_computers)
+        for tx, num_approvals in transaction_approval_map.items():
+            if num_approvals/network_size >= MINIMUM_AGREEMENT_PCT:
+                approved_transactions.append(tx)
+                ballots.append(tx.content)
+
+        results = Ballot.tally(ballots)
+        print(json.dumps(results, indent=4))
+            
+
     def handle_menu_choice(self, choice):
         """
         Redirects menu choice to appropriate function.
@@ -221,7 +270,7 @@ class VotingProgram:
         elif choice == 2:
             self.lookup_voter_id()
         elif choice == 3:
-            pass
+            self.display_results()
         elif choice == 4:
             pass
         elif choice == 5:
@@ -230,10 +279,8 @@ class VotingProgram:
             print("Unrecognized option")
         return True
 
-    def vote(self):
-        """Controls voting flow. Returns whether or not program should continue."""
-        # authenticate voter
-        voter_auth_booth = random.choice(self.voter_authentication_booths)
+    def _authenticate_voter(self, voter_auth_booth):
+        """Authenticates voter and returns voter id (None if voter cannot vote)."""
         voter = utils.get_input_of_type(
             "Please authenticate yourself by typing in your full name.\n",
             str
@@ -248,19 +295,30 @@ class VotingProgram:
             )
             if voter_id not in [v.id for v in voters]:
                 print("Please look up your ID and try again.")
-                return True
+                return None
         elif len(voters) == 1:
-            voter_id = voters[0]
+            voter_id = voters[0].id
 
         authenticated = voter_auth_booth.authenticate_voter(voter_id)
+        can_vote = voter_auth_booth.can_voter_vote(voter_id)
 
         if not authenticated:
             print("{} is not on the voter roll".format(voter))
-            return True
-
-        can_vote = voter_auth_booth.can_voter_vote(voter_id)
-        if not can_vote:
+            return None
+        elif not can_vote:
             print("{} has already voted!".format(voter))
+            return None
+        return voter_id
+
+    def vote(self):
+        """Controls voting flow. Returns whether or not program should continue (election is over)."""
+        voter_auth_booth = random.choice(self.voter_authentication_booths)
+        voter_id = self._authenticate_voter(voter_auth_booth)
+        if not voter_id:
+            return True  # program should continue
+
+        # local global counter
+        self.num_voters_voted+=1
 
         # retrieve ballot claim ticket
         ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter_id)
@@ -270,8 +328,15 @@ class VotingProgram:
         voting_computer = random.choice(self.voting_computers)
         voting_computer.vote(ballot_claim_ticket)
 
-        # return False if election is over (all voters have voted)
+        if self.is_election_over():
+            return False  # don't continue program
         return True
+
+    def is_election_over(self):
+        # check for consensus among global counters from all nodes
+        if self.num_voters_voted >= len(self.voter_roll):
+            return True
+        return False
 
     def lookup_voter_id(self):
         name = utils.get_input_of_type(

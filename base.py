@@ -124,6 +124,7 @@ class BallotClaimTicket:
         self.num_ballots = num_ballots
         self.issued = datetime.now()
         self.signature = self.node.sign_message(self.id)
+        self.errors = ""
 
     def get_signature_contents(self, **signature_kwargs):
         return self.id
@@ -137,7 +138,11 @@ class BallotClaimTicket:
         if not utils.verify_signature(
             ticket.get_signature_contents(),
             ticket.signature, 
-            ticket.node.public_key) or ticket.expired:
+            ticket.node.public_key):
+            ticket.errors = "Invalid ticket signature"
+            return False
+        elif ticket.expired:
+            ticket.errors = "Ticket has expired"
             return False
         return True
 
@@ -167,13 +172,13 @@ class VoterAuthenticationBooth(Node):
         return True
 
     def generate_ballot_claim_ticket(self, voter_id):
+        # TODO: check if voter already received ballot claim ticket
         ticket = BallotClaimTicket(self)
         # TODO: increase global counter
         self.create_transaction(self.voter_roll_index[voter_id])
         return ticket
 
     def create_transaction(self, voter):
-        # TODO: voter class?
         tx = VoterTransaction(voter, self, NOT_RETRIEVED_BALLOT, RETRIEVED_BALLOT)
         self.verified_transactions.add(tx)
         self.broadcast_transactions(tx)
@@ -185,14 +190,14 @@ class VotingComputer(Node):
     def __init__(self, ballot, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ballot = ballot
+        self.blockchain = Blockchain(self)
+        self.blockchain.create_genesis_block()
 
     def get_ballot(self):
         """Returns new ballot"""
         return deepcopy(self.ballot)
 
     def create_transaction(self, ballot_claim_ticket, ballot):
-        # TODO: add ballot claim ticket to transaction
-        # TODO: take in ballot from user
         signature_kwargs = dict()
         tx = BallotTransaction(
             ballot_claim_ticket, ballot, self, BALLOT_CREATED, BALLOT_USED, 
@@ -203,6 +208,9 @@ class VotingComputer(Node):
         self.broadcast_transactions(tx)
 
     def vote(self, ballot_claim_ticket):
+        if not BallotClaimTicket.is_valid(ballot_claim_ticket):
+            print(ballot_claim_ticket.errors)
+            return
         ballot = self.get_ballot()
         ballot_filled_out = ballot.fill_out()
         if ballot_filled_out:
@@ -212,7 +220,7 @@ class VotingComputer(Node):
         valid = super().validate_transaction(transaction)
         if not valid:
             return valid
-        # TODO: check 
+        # TODO: check that ballot claim ticket hasn't been used
         return True
 
 
@@ -279,7 +287,7 @@ class Transaction:
         """Returns transaction's time formatted (Y-M-D H:M) as a string."""
         if self.timestamped:
             return utils.get_formatted_time_str(self.time)
-        return None
+        return ""
 
     @staticmethod
     def validate_transaction(transaction):
@@ -309,3 +317,42 @@ class BallotTransaction(Transaction):
 
 class VoterTransaction(Transaction):
     allowed_states = [NOT_RETRIEVED_BALLOT, RETRIEVED_BALLOT]
+
+
+class Block:
+
+        def __init__(self, transactions, node, previous_block=None, genesis=False):
+            if not genesis and not previous_block:
+                raise Exception('Previous block must be provided for all blocks except genesis')
+                
+            self.transactions = transactions
+            self.node = node
+            self.previous_block = previous_block
+            self.genesis = genesis
+            self.time = datetime.now()
+            self.header = node.sign_message(self.get_signature_contents())
+
+        def get_signature_contents(self, **signature_kwargs):
+            str_list = []
+            for tx in self.transactions:
+                str_list.append(tx.signature)
+            
+            if self.previous_block:
+                str_list.append(self.previous_block.header)
+            str_list.append(utils.get_formatted_time_str(self.time))
+            str_list.append(str(self.genesis))
+            return ":".join(str_list)
+
+
+class Blockchain:
+
+    def __init__(self, node):
+        self.node = node
+
+    def create_genesis_block(self):
+        self.current_block = Block([], self.node, genesis=True)
+
+    def add_block(self):
+        pass
+
+    
