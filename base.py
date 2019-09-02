@@ -114,14 +114,13 @@ class Node:
 
 
 class BallotClaimTicket:
-    """Ticket issued after voter authenticates """
+    """Ticket issued after voter authenticates. Authorizes one ballot."""
 
-    DURATION = timedelta(minutes=5)
+    DURATION = timedelta(minutes=10)
 
-    def __init__(self, node, num_ballots=1):
+    def __init__(self, node):
         self.id = str(random.getrandbits(128))  # assign a random ID to the ballot
         self.node = node
-        self.num_ballots = num_ballots
         self.issued = datetime.now()
         self.signature = self.node.sign_message(self.id)
         self.errors = ""
@@ -155,6 +154,8 @@ class VoterAuthenticationBooth(Node):
         super().__init__(*args, **kwargs)
         self.voter_roll = voter_roll
         self.voter_roll_index = {voter.id:voter for voter in self.voter_roll}
+        self.blockchain = VoterBlockchain(self)
+        self.blockchain.create_genesis_block(self.voter_roll)
 
     def authenticate_voter(self, voter_id):
         return True if voter_id in self.voter_roll_index else False
@@ -190,8 +191,8 @@ class VotingComputer(Node):
     def __init__(self, ballot, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.ballot = ballot
-        self.blockchain = Blockchain(self)
-        self.blockchain.create_genesis_block()
+        self.blockchain = BallotBlockchain(self)
+        self.blockchain.create_genesis_block(self.ballot)
 
     def get_ballot(self):
         """Returns new ballot"""
@@ -326,13 +327,19 @@ class Block:
                 raise Exception('Previous block must be provided for all blocks except genesis')
                 
             self.transactions = transactions
+            self.state = {}
+            self.apply_transactions()
             self.node = node
             self.previous_block = previous_block
             self.genesis = genesis
             self.time = datetime.now()
             self.header = node.sign_message(self.get_signature_contents())
 
+        def apply_transactions(self):
+            pass
+
         def get_signature_contents(self, **signature_kwargs):
+            """TODO: make this state + previous_block"""
             str_list = []
             for tx in self.transactions:
                 str_list.append(tx.signature)
@@ -344,15 +351,61 @@ class Block:
             return ":".join(str_list)
 
 
+class VoterBlock(Block):
+
+    def apply_transactions(self):
+        '''
+        for tx in self.transactions:
+            voter = tx.content
+            voter.id
+        '''
+        pass
+
+
+class BallotBlock(Block):
+
+    def apply_transactions(self):
+        pass
+
+
 class Blockchain:
+    block_class = None
 
     def __init__(self, node):
         self.node = node
+        self.current_block = None
 
     def create_genesis_block(self):
-        self.current_block = Block([], self.node, genesis=True)
-
-    def add_block(self):
         pass
 
-    
+    def add_block(self, transactions):
+        block = self.block_class(transactions, self.node, previous_block=self.current_block)
+        self.current_block = block
+
+
+class VoterBlockchain(Blockchain):
+    block_class = Voterblock
+
+    def create_genesis_block(self, voter_roll):
+        self.current_block = self.block_class([], self.node, genesis=True)
+        # set initial state to voter roll with number of allotted claim tickets
+        initial_state = {}  #deepcopy(voter_roll)
+        for voter in voter_roll:
+            initial_state[voter.id] = voter.num_claim_tickets
+        self.current_block.state = initial_state
+
+
+class BallotBlockchain(Blockchain):
+    block_class = BallotBlock
+
+    def create_genesis_block(self, empty_ballot):
+        self.current_block = self.block_class([], self.node, genesis=True)
+        initial_state = {}
+        # set initial state to index of position and candidate with 0 votes
+        for position in empty_ballot.items:
+            initial_state[position] = {}
+            position_data = empty_ballot.items[position]
+            for choice in position_data['choices']:
+                initial_state[position][choice] = 0
+        # set genesis block state
+        self.current_block.state = initial_state

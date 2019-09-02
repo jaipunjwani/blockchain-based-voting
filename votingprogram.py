@@ -2,18 +2,21 @@ import random
 import utils
 import json
 
+from datetime import datetime, timedelta
 from base import VotingComputer, VoterAuthenticationBooth
 from copy import copy, deepcopy
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 MINIMUM_AGREEMENT_PCT = 0.8  # required consensus for blockchain approval
+CONSENSUS_ROUND_INTERVAL = 30  # consensus takes place every X seconds
 
 class Voter:
 
-    def __init__(self, voter_id, name):
+    def __init__(self, voter_id, name, num_claim_tickets):
         self.id = str(voter_id)
         self.name = name
+        self.num_claim_tickets = num_claim_tickets
 
     def __repr__(self):
         return self.name
@@ -204,6 +207,7 @@ class VotingProgram:
         # initialize blockchain with appropriate content?
 
     def begin_program(self):
+        self.last_time = datetime.now()
         continue_program = True
     
         while continue_program:
@@ -212,10 +216,23 @@ class VotingProgram:
             self.display_menu()
             choice = utils.get_input_of_type("Enter in an option: ", int)
             continue_program = self.handle_menu_choice(choice)
+            if self.is_election_over():
+                break
+            if self.is_consensus_round():
+                self.demonstrate_consensus()
             input("Press any key to continue")
 
         print("Election over! Results: ")
         self.display_results()
+
+    def is_consensus_round(self):
+        if datetime.now() - self.last_time >= timedelta(seconds=CONSENSUS_ROUND_INTERVAL):
+            self.last_time = datetime.now()
+            return True
+        return False
+
+    def demonstrate_consensus(self):
+        print('Demonstrating consensus round!')
 
     def display_header(self):
         print ("{}".format(self.ballot.election))
@@ -266,7 +283,7 @@ class VotingProgram:
         Returns whether or not program should continue.
         """
         if choice == 1:
-            return self.vote()
+            self.vote()
         elif choice == 2:
             self.lookup_voter_id()
         elif choice == 3:
@@ -311,7 +328,7 @@ class VotingProgram:
         return voter_id
 
     def vote(self):
-        """Controls voting flow. Returns whether or not program should continue (election is over)."""
+        """Simulates voter's experience at authentication and voter booths."""
         voter_auth_booth = random.choice(self.voter_authentication_booths)
         voter_id = self._authenticate_voter(voter_auth_booth)
         if not voter_id:
@@ -327,10 +344,6 @@ class VotingProgram:
         # vote
         voting_computer = random.choice(self.voting_computers)
         voting_computer.vote(ballot_claim_ticket)
-
-        if self.is_election_over():
-            return False  # don't continue program
-        return True
 
     def is_election_over(self):
         # check for consensus among global counters from all nodes
@@ -362,8 +375,14 @@ class VotingProgram:
             for voter in file:
                 voter = voter.strip().lower()  # use lowercase for simplicity
                 if voter:
-                    voter_roll.append(Voter(voter_id, voter))
-                    voter_id = voter_id + 1
+                    voter_data = voter.split(' ')
+                    voter = voter_data[0]
+                    if len(voter_data) > 1:
+                        num_claim_tickets = voter_data[1]
+                    else:
+                        num_claim_tickets = 1
+                    voter_roll.append(Voter(voter_id, voter, num_claim_tickets))
+                    voter_id += 1
         print ("Registered voters from {}: {}".format(
             self.path, voter_roll)
         )
