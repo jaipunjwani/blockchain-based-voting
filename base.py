@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
-from copy import deepcopy
+from copy import copy, deepcopy
 from constants import *
 import utils
 import random
+from exceptions import NotEnoughBallotClaimTickets, UnrecognizedNode
 
 class Node:
     """Abstract class for Node that participates in a blockchain"""
@@ -51,7 +52,7 @@ class Node:
         """
         # check that source is trusted and validate transaction
         if (not self.is_node_in_network(transaction.node.public_key)):
-            raise Exception('Unexpected node!')
+            raise UnexpectedNode('Unexpected node!')
         valid = self.validate_transaction(transaction)
         if valid:
             self.verified_transactions.add(transaction)
@@ -63,6 +64,14 @@ class Node:
     def validate_transaction(self, transaction):
         """Performs basic validation of transaction. Should be combined with any content-specific validation in child classes."""
         return Transaction.validate_transaction(transaction)
+
+    def begin_consensus_round(self):
+        self.send_nodes_transactions_for_consensus()
+
+    def send_nodes_transactions_for_consensus(self):
+        """Sends verified transactions to all nodes in the network specifically for the consensus round"""
+        for node in self.node_mapping.values():
+            node.check_transactions_for_consensus(self.verified_transactions)
 
     def check_transactions_for_consensus(self, transactions):
         """Validates a collection of transactions and adjusts each one's tally during the consensus round.
@@ -78,18 +87,8 @@ class Node:
                 validity = 1 if self.validate_transaction(tx) else 0
                 self.transaction_tally[tx] = validity
 
-    def send_nodes_transactions_for_consensus(self):
-        """Sends verified transactions to all nodes in the network specifically for the consensus round"""
-        for node in self.node_mapping.values():
-            node.check_transactions_for_consensus(self.verified_transactions)
-
-    def set_blockchain(self, blockchain):
-        """Sets the blockchain software for this Node.
-        Args:
-            blockchain      independent copy of a master Blockchain
-        """
-        blockchain.create_genesis_block(self)
-        self.blockchain = blockchain
+    def end_consensus_round(self):
+        pass  # cleanup such as clearing out verified transactions that made the block
 
     def create_block(self):
         """Supposed to happen during consensus round, in which Node creates block after all transactions
@@ -160,20 +159,34 @@ class VoterAuthenticationBooth(Node):
     def authenticate_voter(self, voter_id):
         return True if voter_id in self.voter_roll_index else False
 
-    def can_voter_vote(self, voter_id):
-        return self.authenticate_voter(voter_id)
-        # TODO: add logic for checking if voter has voted
-
     def validate_transaction(self, transaction):
-        valid = super().validate_transaction(transaction)
-        if not valid:
-            return valid
+        if not super().validate_transaction(transaction):
+            return False
+    
+        # check that voter is on original voter roll
+        voter = transaction.content
+        if not voter.id in self.blockchain.current_block.state:
+            return False
 
-        # TODO: check blockchain then current txs for violations
+        # Check blockchain & open transactions that voter has not exceeded alloted claim tickets
+        if not self._voter_has_claim_tickets(voter.id):
+            return False
         return True
 
+    def _voter_has_claim_tickets(self, voter_id):
+        """
+        Determines whether voter has claim tickets left based on
+        blockchain state and open transactions
+        """
+        claim_tickets_left = self.blockchain.current_block.state.get(voter_id)
+        for tx in self.verified_transactions:
+            if tx.content.id == voter_id:
+                claim_tickets_left -= 1
+        return True if claim_tickets_left > 0 else False
+
     def generate_ballot_claim_ticket(self, voter_id):
-        # TODO: check if voter already received ballot claim ticket
+        if not self._voter_has_claim_tickets(voter_id):
+            raise NotEnoughBallotClaimTickets()
         ticket = BallotClaimTicket(self)
         # TODO: increase global counter
         self.create_transaction(self.voter_roll_index[voter_id])
@@ -218,10 +231,18 @@ class VotingComputer(Node):
             self.create_transaction(ballot_claim_ticket, ballot)
 
     def validate_transaction(self, transaction):
-        valid = super().validate_transaction(transaction)
-        if not valid:
-            return valid
-        # TODO: check that ballot claim ticket hasn't been used
+        if not super().validate_transaction(transaction):
+            return False
+
+        # validate ballot claim ticket signature
+        if not BallotClaimTicket.is_valid(transaction.ballot_claim_ticket):
+            return False
+
+        # check that ballot claim ticket hasn't been used
+        for used_claim_ticket in self.blockchain.ballot_claim_tickets:
+            if used_claim_ticket.id == transaction.ballot_claim_ticket.id:
+                return False
+
         return True
 
 
@@ -322,16 +343,20 @@ class VoterTransaction(Transaction):
 
 class Block:
 
+        # TODO: am I even creating a block?
         def __init__(self, transactions, node, previous_block=None, genesis=False):
             if not genesis and not previous_block:
                 raise Exception('Previous block must be provided for all blocks except genesis')
                 
             self.transactions = transactions
-            self.state = {}
-            self.apply_transactions()
             self.node = node
             self.previous_block = previous_block
             self.genesis = genesis
+            if self.genesis:
+                self.state = {}
+            else:
+                self.state = copy(self.previous_block.state)
+            self.apply_transactions()
             self.time = datetime.now()
             self.header = node.sign_message(self.get_signature_contents())
 
@@ -354,18 +379,27 @@ class Block:
 class VoterBlock(Block):
 
     def apply_transactions(self):
-        '''
         for tx in self.transactions:
             voter = tx.content
-            voter.id
-        '''
-        pass
+            # assumes voter id is already in voter roll
+            # if it's not (e.g., a node adds a voter after registration),
+            # then this should be caught in validation step
+            self.state[voter.id] -= 1
 
 
 class BallotBlock(Block):
 
     def apply_transactions(self):
-        pass
+        for tx in self.transactions:
+            ballot = tx.content
+            for position in ballot.items:
+                choices = ballot.items[position]['choices']
+                selected = ballot.items[position]['selected']
+                selected_choices = map(lambda n: choices[n], selected)
+                for selection in selected_choices:
+                    self.state[position][selection] += 1
+        #import json
+        #print (json.dumps(self.state, indent=4))
 
 
 class Blockchain:
@@ -381,21 +415,29 @@ class Blockchain:
     def add_block(self, transactions):
         block = self.block_class(transactions, self.node, previous_block=self.current_block)
         self.current_block = block
+        self.post_add_block()
+
+    def post_add_block(self):
+        """Signal for implementing behavior after adding a new block (such as updating global values)"""
+        pass
 
 
 class VoterBlockchain(Blockchain):
-    block_class = Voterblock
+    # TODO: add global counters
+    block_class = VoterBlock
 
     def create_genesis_block(self, voter_roll):
         self.current_block = self.block_class([], self.node, genesis=True)
         # set initial state to voter roll with number of allotted claim tickets
-        initial_state = {}  #deepcopy(voter_roll)
+        initial_state = {}
         for voter in voter_roll:
             initial_state[voter.id] = voter.num_claim_tickets
         self.current_block.state = initial_state
 
 
 class BallotBlockchain(Blockchain):
+    # TODO: add global counters
+    ballot_claim_tickets = []
     block_class = BallotBlock
 
     def create_genesis_block(self, empty_ballot):
@@ -407,5 +449,9 @@ class BallotBlockchain(Blockchain):
             position_data = empty_ballot.items[position]
             for choice in position_data['choices']:
                 initial_state[position][choice] = 0
-        # set genesis block state
         self.current_block.state = initial_state
+
+    def post_add_block(self):
+        for tx in self.current_block.transactions:
+            # aggregate all ballot claim tickets used for convenience
+            self.ballot_claim_tickets.append(tx.ballot_claim_ticket)

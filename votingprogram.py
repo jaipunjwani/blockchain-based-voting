@@ -7,6 +7,7 @@ from base import VotingComputer, VoterAuthenticationBooth
 from copy import copy, deepcopy
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
+from exceptions import NotEnoughBallotClaimTickets
 
 MINIMUM_AGREEMENT_PCT = 0.8  # required consensus for blockchain approval
 CONSENSUS_ROUND_INTERVAL = 30  # consensus takes place every X seconds
@@ -222,6 +223,7 @@ class VotingProgram:
                 self.demonstrate_consensus()
             input("Press any key to continue")
 
+        self.demonstrate_consensus()
         print("Election over! Results: ")
         self.display_results()
 
@@ -256,9 +258,11 @@ class VotingProgram:
     def display_results(self):
         # get results from all nodes in ballot blockchain
         # TODO: check blockchain results first
+        #self.blockchain.current
         # extract ballot from transactions that have consensus from network
         transaction_approval_map = {}
         for node in self.voting_computers:
+            # aggregate all open and verified transactions for all nodes
             for tx in node.verified_transactions:
                 if tx in transaction_approval_map:
                     transaction_approval_map[tx] += 1
@@ -275,7 +279,6 @@ class VotingProgram:
 
         results = Ballot.tally(ballots)
         print(json.dumps(results, indent=4))
-            
 
     def handle_menu_choice(self, choice):
         """
@@ -304,7 +307,7 @@ class VotingProgram:
         ).lower()
         voter_id = None
 
-        voters = self.get_voter_by_id(voter)
+        voters = self.get_voter_by_name(voter)
         if len(voters) > 1:
             voter_id = utils.get_input_of_type(
                 "Multiple matches found for {}. Please enter in your voter id.\n".format(voter),
@@ -317,13 +320,9 @@ class VotingProgram:
             voter_id = voters[0].id
 
         authenticated = voter_auth_booth.authenticate_voter(voter_id)
-        can_vote = voter_auth_booth.can_voter_vote(voter_id)
 
         if not authenticated:
             print("{} is not on the voter roll".format(voter))
-            return None
-        elif not can_vote:
-            print("{} has already voted!".format(voter))
             return None
         return voter_id
 
@@ -332,18 +331,22 @@ class VotingProgram:
         voter_auth_booth = random.choice(self.voter_authentication_booths)
         voter_id = self._authenticate_voter(voter_auth_booth)
         if not voter_id:
-            return True  # program should continue
+            return
 
-        # local global counter
-        self.num_voters_voted+=1
-
-        # retrieve ballot claim ticket
-        ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter_id)
-        print("Retrieved ballot claim ticket. Please proceed to the voting booths.\n")
+        # try to retrieve ballot claim ticket
+        try:
+            ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter_id)
+            print("Retrieved ballot claim ticket. Please proceed to the voting booths.\n")
+        except NotEnoughBallotClaimTickets as e:
+            print(e)
+            return
 
         # vote
         voting_computer = random.choice(self.voting_computers)
         voting_computer.vote(ballot_claim_ticket)
+
+        # TODO: local global counter
+        self.num_voters_voted+=1
 
     def is_election_over(self):
         # check for consensus among global counters from all nodes
@@ -356,7 +359,7 @@ class VotingProgram:
                 "Type in your full name: ",
                 str
             ).lower()
-        matches = self.get_voter_by_id(name)
+        matches = self.get_voter_by_name(name)
 
         if not matches:
             print("No matches found")
@@ -365,23 +368,20 @@ class VotingProgram:
                 [voter.id for voter in matches]
             ))
 
-    def get_voter_by_id(self, name):
+    def get_voter_by_name(self, name):
         return [voter for voter in self.voter_roll if voter.name == name]
 
     def load_voter_roll(self):
         voter_roll = []
         voter_id = 1
+
         with open(self.path, 'r') as file:
-            for voter in file:
-                voter = voter.strip().lower()  # use lowercase for simplicity
-                if voter:
-                    voter_data = voter.split(' ')
-                    voter = voter_data[0]
-                    if len(voter_data) > 1:
-                        num_claim_tickets = voter_data[1]
-                    else:
-                        num_claim_tickets = 1
-                    voter_roll.append(Voter(voter_id, voter, num_claim_tickets))
+            voter_roll_dict = json.load(file)
+            for voter in voter_roll_dict:
+                name = voter['name'].strip().lower()  # use lowercase for simplicity
+                if name:
+                    num_claim_tickets = int(voter.get('num_claim_tickets', 1))
+                    voter_roll.append(Voter(voter_id, name, num_claim_tickets))
                     voter_id += 1
         print ("Registered voters from {}: {}".format(
             self.path, voter_roll)
