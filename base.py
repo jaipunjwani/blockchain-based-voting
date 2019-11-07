@@ -65,12 +65,25 @@ class Node:
         """Performs basic validation of transaction. Should be combined with any content-specific validation in child classes."""
         return Transaction.validate_transaction(transaction)
 
-    def begin_consensus_round(self):
-        self.send_nodes_transactions_for_consensus()
+    def begin_consensus_round(self, nodes=None):
+        """
+        Args:
+            nodes  nodes to participate in consensus with. used to whitelist nodes
+                    when nodes with a different block hash are detected. defaults
+                    to entire network
+        """
+        if nodes:
+            try:
+                nodes.remove(self)
+            except ValueError as e:
+                print(e)
+        else:
+            nodes = self.node_mapping.values()
+        self.send_nodes_transactions_for_consensus(nodes)
 
-    def send_nodes_transactions_for_consensus(self):
+    def send_nodes_transactions_for_consensus(self, nodes):
         """Sends verified transactions to all nodes in the network specifically for the consensus round"""
-        for node in self.node_mapping.values():
+        for node in nodes:
             node.check_transactions_for_consensus(self.verified_transactions)
 
     def check_transactions_for_consensus(self, transactions):
@@ -87,14 +100,33 @@ class Node:
                 validity = 1 if self.validate_transaction(tx) else 0
                 self.transaction_tally[tx] = validity
 
-    def end_consensus_round(self):
-        pass  # cleanup such as clearing out verified transactions that made the block
+    def finalize_consensus_round(self):
+        """Finalizes block and resets state for next round"""
+        # aggregate results
+        network_size = len(self.node_mapping.values()) + 1  # add itself
+        approved_transactions = []
+        rejected_transactions = []
+        for tx in self.transaction_tally:
+            tally = self.transaction_tally[tx]
+            if tally/network_size >= MINIMUM_AGREEMENT_PCT:
+                approved_transactions.append(tx)
+            else:
+                rejected_transactions.append(tx)
 
-    def create_block(self):
-        """Supposed to happen during consensus round, in which Node creates block after all transactions
-        are approved by majority of network.
-        """
-        pass
+        # finalize block
+        self.blockchain.add_block(approved_transactions)
+
+        # reset round
+        self.transaction_tally = {}
+        for tx in approved_transactions:
+            try:
+                self.verified_transactions.remove(tx)
+            except KeyError:
+                pass
+            try:
+                self.rejected_transactions.remove(tx)
+            except KeyError:
+                pass
 
     def is_node_in_network(self, public_key):
         """Returns whether or not public key is one of the recognized nodes, including itself.
@@ -127,10 +159,6 @@ class BallotClaimTicket:
     def get_signature_contents(self, **signature_kwargs):
         return self.id
 
-    @property
-    def expired(self):
-        return datetime.now() >= self.issued + self.DURATION
-
     @staticmethod
     def is_valid(ticket):
         if not utils.verify_signature(
@@ -138,9 +166,6 @@ class BallotClaimTicket:
             ticket.signature, 
             ticket.node.public_key):
             ticket.errors = "Invalid ticket signature"
-            return False
-        elif ticket.expired:
-            ticket.errors = "Ticket has expired"
             return False
         return True
 
@@ -221,14 +246,22 @@ class VotingComputer(Node):
         # TODO: update global counters
         self.broadcast_transactions(tx)
 
-    def vote(self, ballot_claim_ticket):
-        if not BallotClaimTicket.is_valid(ballot_claim_ticket):
+    def vote(self, ballot_claim_ticket, **kwargs):
+        # pre-voting: authorize claim ticket
+        if not self.validate_ballot_claim_ticket(ballot_claim_ticket):
             print(ballot_claim_ticket.errors)
             return
+
+        # voting: retrieve and fill out ballot
         ballot = self.get_ballot()
-        ballot_filled_out = ballot.fill_out()
+        ballot_filled_out = ballot.fill_out(**kwargs)
+
+        # post-voting: validate ballot and create tx
         if ballot_filled_out:
             self.create_transaction(ballot_claim_ticket, ballot)
+
+    def validate_ballot_claim_ticket(self, ballot_claim_ticket):
+        return BallotClaimTicket.is_valid(ballot_claim_ticket)
 
     def validate_transaction(self, transaction):
         if not super().validate_transaction(transaction):
@@ -358,7 +391,8 @@ class Block:
                 self.state = copy(self.previous_block.state)
             self.apply_transactions()
             self.time = datetime.now()
-            self.header = node.sign_message(self.get_signature_contents())
+            self.hash = self.get_signature_contents()
+            self.header = node.sign_message(self.hash)
 
         def apply_transactions(self):
             pass
@@ -367,10 +401,11 @@ class Block:
             """TODO: make this state + previous_block"""
             str_list = []
             for tx in self.transactions:
-                str_list.append(tx.signature)
+                str_list.append(tx.signature.hex())
             
             if self.previous_block:
-                str_list.append(self.previous_block.header)
+                str_list.append(self.previous_block.hash)  # use hash rather than individually signed hash
+
             str_list.append(utils.get_formatted_time_str(self.time))
             str_list.append(str(self.genesis))
             return ":".join(str_list)
@@ -398,8 +433,6 @@ class BallotBlock(Block):
                 selected_choices = map(lambda n: choices[n], selected)
                 for selection in selected_choices:
                     self.state[position][selection] += 1
-        #import json
-        #print (json.dumps(self.state, indent=4))
 
 
 class Blockchain:
