@@ -6,6 +6,16 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 
+def get_key_pair(key_size=512):
+    private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=512,
+            backend=default_backend()
+        )
+    public_key = private_key.public_key()
+    return public_key, private_key
+
+
 def sign(message, private_key):
     """Signs a message with an RSA private key.
     Args:
@@ -47,7 +57,8 @@ def verify_signature(message, signature, public_key):
         )
         return True
     except InvalidSignature:
-        print('Invalid Signature!')
+        # log 'Invalid signature'
+        pass
     except Exception as e:
         print('Unexpected error: {}'.format(e))
     return False

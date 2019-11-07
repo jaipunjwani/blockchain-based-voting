@@ -1,9 +1,11 @@
 import random
+import time
 import utils
 import json
 from constants import *
 from datetime import datetime, timedelta
-from base import VotingComputer, VoterAuthenticationBooth
+from base import (VotingComputer, VoterAuthenticationBooth, 
+    UnrecognizedVoterAuthenticationBooth, AdversaryVotingComputer)
 from copy import copy, deepcopy
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -153,12 +155,7 @@ class Ballot:
 def create_nodes(NodeClass, *additional_args, num_nodes=0, is_adversary=False):
     nodes = []
     for i in range(num_nodes):
-        private_key = rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=512,
-            backend=default_backend()
-        )
-        public_key = private_key.public_key()
+        public_key, private_key = utils.get_key_pair()
         args_list = list(additional_args) + [public_key, private_key]
         args = tuple(args_list)
         node = NodeClass(*args, is_adversary=is_adversary)
@@ -177,9 +174,22 @@ class VotingProgram:
     path = 'voter_roll.txt'
     num_voters_voted = 0
 
-    def setup(self, adversarial_mode=False, consensus_round_interval=DEFAULT_CONSENSUS_ROUND_INTERVAL):
+    def setup(self, 
+              adversarial_mode=False, 
+              consensus_round_interval=DEFAULT_CONSENSUS_ROUND_INTERVAL,
+              total_nodes=50):
         self.adversarial_mode = adversarial_mode
         self.consensus_round_interval = consensus_round_interval
+        self.total_nodes = total_nodes
+        self.total_adversarial_nodes = 0
+        voter_node_adversary_class = None
+        voting_node_adversary_class = None
+        if self.adversarial_mode:
+            self.total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
+            # TODO: set class, randomize?
+            voter_node_adversary_class = UnrecognizedVoterAuthenticationBooth
+            voting_node_adversary_class = AdversaryVotingComputer
+
 
         # set up election with ballot template
         self.ballot = Ballot(election='U.S. 2020 Federal Election')
@@ -200,13 +210,21 @@ class VotingProgram:
         # load voter roll from file/configuration
         self.load_voter_roll()
 
-        # initialize nodes
-        num_nodes = 50
+        # initialize regular nodes
+        num_nodes = self.total_nodes - self.total_adversarial_nodes
         self.voting_computers = create_nodes(
             VotingComputer, self.ballot, num_nodes=num_nodes
         )
         self.voter_authentication_booths = create_nodes(
             VoterAuthenticationBooth, self.voter_roll, num_nodes=num_nodes
+        )
+
+        # initialize adversary nodes
+        self.voting_computers += (
+            create_nodes(voting_node_adversary_class, self.ballot, num_nodes=self.total_adversarial_nodes)
+        )
+        self.voter_authentication_booths += (
+            create_nodes(voter_node_adversary_class, self.voter_roll, num_nodes=self.total_adversarial_nodes)
         )
 
         # construct copy of PKI and add to all nodes
@@ -275,6 +293,18 @@ class VotingProgram:
                     node.begin_consensus_round(nodes=nodes.copy())
             for node in nodes:
                 node.finalize_consensus_round()
+
+            # compile stats for each node per group
+            node = nodes[-1]
+
+            print('Transactions approved: {}'.format(len(node.last_round_approvals)))
+            rejection_msg = 'Transactions rejected: {}.'.format(len(node.last_round_rejections))
+            if len(node.last_round_rejections) > 0:
+                rejection_msg = '{} Reason(s): {}'.format(rejection_msg, node.last_round_rejection_reasons)
+            print(rejection_msg)
+
+        
+        time.sleep(2)
         '''
         # step 2 -- achieve consensus on next set of transactions
         for node in nodes:
@@ -282,16 +312,19 @@ class VotingProgram:
         for node in nodes:
             node.finalize_consensus_round()
         '''
-        print()
 
     def display_header(self):
+        if self.adversarial_mode:
+            print("ADVERSARIAL mode")
         print ("{}".format(self.ballot.election))
-        print ("Voter Blockchain  | Nodes: {}\t Adversary Nodes: {}".format(
-                len(self.voter_authentication_booths), 0
+        print ("Voter Blockchain  | Normal Nodes: {}\t Adversary Nodes: {}".format(
+                len(self.voter_authentication_booths) - self.total_adversarial_nodes, 
+                self.total_adversarial_nodes
             )
         )
-        print ("Ballot Blockchain | Nodes: {}\t Adversary Nodes: {}".format(
-                len(self.voting_computers), 0
+        print ("Ballot Blockchain | Normal Nodes: {}\t Adversary Nodes: {}".format(
+                len(self.voting_computers) - self.total_adversarial_nodes, 
+                self.total_adversarial_nodes
             )
         )
         next_consensus_round = self.last_time + timedelta(seconds=self.consensus_round_interval)

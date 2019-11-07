@@ -21,6 +21,8 @@ class Node:
         self.rejected_transactions = set()  # transactions that failed validation, but will be included in next round
         self.transaction_tally = dict()  # holds tally for each transaction during consensus round
         self.is_adversary = is_adversary
+        self.last_round_approvals = set()
+        self.last_round_rejections = set()
 
     def set_node_mapping(self, node_dict):
         """Sets mapping for public key addresses to each node in the network.
@@ -52,7 +54,9 @@ class Node:
         """
         # check that source is trusted and validate transaction
         if (not self.is_node_in_network(transaction.node.public_key)):
-            raise UnexpectedNode('Unexpected node!')
+            # log
+            self.rejected_transactions.add(transaction)
+            return False
         valid = self.validate_transaction(transaction)
         if valid:
             self.verified_transactions.add(transaction)
@@ -102,6 +106,10 @@ class Node:
 
     def finalize_consensus_round(self):
         """Finalizes block and resets state for next round"""
+        self.last_round_approvals.clear()
+        self.last_round_rejections.clear()
+        self.last_round_rejection_reasons = ''
+
         # aggregate results
         network_size = len(self.node_mapping.values()) + 1  # add itself
         approved_transactions = []
@@ -110,8 +118,11 @@ class Node:
             tally = self.transaction_tally[tx]
             if tally/network_size >= MINIMUM_AGREEMENT_PCT:
                 approved_transactions.append(tx)
+                self.last_round_approvals.add(tx)
             else:
                 rejected_transactions.append(tx)
+                self.last_round_rejections.add(tx)
+                self.last_round_rejection_reasons = 'TODO'
 
         # finalize block
         self.blockchain.add_block(approved_transactions)
@@ -170,6 +181,15 @@ class BallotClaimTicket:
         return True
 
 
+class KeyChangingNodeMixin(object):
+    """Injects faulty/adversary behavior in node so that it changes its 
+    key pair each time it signs something."""
+
+    def sign_message(self, message):
+        self.public_key, self._private_key = utils.get_key_pair()
+        return super().sign_message(message)
+
+
 class VoterAuthenticationBooth(Node):
     """Voter Registration Authority / Node responsible for authenticating voter
     and creating transactions on VoterBlockchain."""
@@ -221,6 +241,10 @@ class VoterAuthenticationBooth(Node):
         tx = VoterTransaction(voter, self, NOT_RETRIEVED_BALLOT, RETRIEVED_BALLOT)
         self.verified_transactions.add(tx)
         self.broadcast_transactions(tx)
+
+class UnrecognizedVoterAuthenticationBooth(KeyChangingNodeMixin,
+                                           VoterAuthenticationBooth):
+    pass
 
 
 class VotingComputer(Node):
@@ -277,6 +301,10 @@ class VotingComputer(Node):
                 return False
 
         return True
+
+
+class AdversaryVotingComputer(VotingComputer):
+    pass
 
 
 class Transaction:
