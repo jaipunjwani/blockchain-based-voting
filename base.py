@@ -302,9 +302,12 @@ class VotingComputer(Node):
 
         return True
 
-
+# TODO- rename to DOSVotingComputer or specific name
 class AdversaryVotingComputer(VotingComputer):
-    pass
+
+    def check_transactions_for_consensus(self, txs):
+        pass  # doesn't vote on validity during consensus
+
 
 
 class Transaction:
