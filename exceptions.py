@@ -11,9 +11,17 @@ class NotEnoughBallotClaimTickets(BaseException):
     default_message = 'You do not have enough claim ticket(s) left'
 
 
+class UsedBallotClaimTicket(BaseException):
+	default_message = 'This ballot claim ticket has already been used'
+
+
 class InvalidBallot(BaseException):
     default_message = 'Invalid ballot'
 
 
 class UnrecognizedNode(BaseException):
     default_message = 'Node not recognized'
+
+
+class UnknownVoter(BaseException):
+	default_message = 'Voter is not on voter roll'

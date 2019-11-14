@@ -13,6 +13,8 @@ def main():
     consensus_round_interval = 6 if simulation else 30
 
     program = Simulation() if simulation else VotingProgram()
+
+    # TODO: simulation supports a few types of adversaries and the regular voting program supports all
     
     print("Setting up election...")
     program.setup(adversarial_mode=adversarial_mode, consensus_round_interval=consensus_round_interval)

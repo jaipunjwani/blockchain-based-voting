@@ -55,13 +55,10 @@ def verify_signature(message, signature, public_key):
             ),
             hashes.SHA256()
         )
-        return True
-    except InvalidSignature:
-        # log 'Invalid signature'
-        pass
+    except InvalidSignature as e:
+        raise e
     except Exception as e:
-        print('Unexpected error: {}'.format(e))
-    return False
+        raise Exception('Unexpected error: {}'.format(e))
 
 
 def get_formatted_time_str(date_obj):

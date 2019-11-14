@@ -3,12 +3,29 @@ from copy import copy, deepcopy
 from constants import *
 import utils
 import random
-from exceptions import NotEnoughBallotClaimTickets, UnrecognizedNode
+from exceptions import (NotEnoughBallotClaimTickets, UnrecognizedNode, 
+    UnknownVoter, UsedBallotClaimTicket)
+import logging
+from cryptography.exceptions import InvalidSignature
+from election import FlexibleBallot, Voter
+
+
+logger = logging.getLogger('node')
+logger.setLevel(logging.INFO)
+
+f_handler = logging.FileHandler('logs/node.log', mode='a')
+f_handler.setLevel(logging.INFO)
+
+f_format = logging.Formatter('%(asctime)s Node %(public_key)s: %(message)s')
+f_handler.setFormatter(f_format)
+
+logger.addHandler(f_handler)
 
 class Node:
     """Abstract class for Node that participates in a blockchain"""
+    is_adversary = False
 
-    def __init__(self, public_key, private_key, is_adversary=None):
+    def __init__(self, public_key, private_key):
         """
         Args:
             public_key      RSA public key
@@ -20,9 +37,12 @@ class Node:
         self.verified_transactions = set()
         self.rejected_transactions = set()  # transactions that failed validation, but will be included in next round
         self.transaction_tally = dict()  # holds tally for each transaction during consensus round
-        self.is_adversary = is_adversary
         self.last_round_approvals = set()
         self.last_round_rejections = set()
+        self.rejection_map = {}
+
+    def log(self, message):
+        logger.info(message, extra={'public_key': hash(self.public_key)})
 
     def set_node_mapping(self, node_dict):
         """Sets mapping for public key addresses to each node in the network.
@@ -52,22 +72,20 @@ class Node:
         Raises:
             Exception: if transaction Node is not in network
         """
-        # check that source is trusted and validate transaction
-        if (not self.is_node_in_network(transaction.node.public_key)):
-            # log
-            self.rejected_transactions.add(transaction)
-            return False
-        valid = self.validate_transaction(transaction)
-        if valid:
+        try:
+            # check that source is trusted and validate transaction
+            self.is_node_in_network(transaction.node.public_key)
+            self.validate_transaction(transaction)
             self.verified_transactions.add(transaction)
             return True
-        else:
+        except Exception as e:
+            self.log(e)
             self.rejected_transactions.add(transaction)
             return False
 
     def validate_transaction(self, transaction):
         """Performs basic validation of transaction. Should be combined with any content-specific validation in child classes."""
-        return Transaction.validate_transaction(transaction)
+        Transaction.validate_transaction(transaction)
 
     def begin_consensus_round(self, nodes=None):
         """
@@ -83,6 +101,8 @@ class Node:
                 print(e)
         else:
             nodes = self.node_mapping.values()
+        self.last_round_nodes = nodes
+        self.rejection_map = {}
         self.send_nodes_transactions_for_consensus(nodes)
 
     def send_nodes_transactions_for_consensus(self, nodes):
@@ -97,12 +117,17 @@ class Node:
         """
         for tx in transactions:
             # check if we have already approved a transaction
+            # TODO - check this logic...
             if tx in self.transaction_tally:
                 self.transaction_tally[tx] = self.transaction_tally[tx] + 1
             else:
                 # validate transaction and set tally accordingly
-                validity = 1 if self.validate_transaction(tx) else 0
-                self.transaction_tally[tx] = validity
+                try:
+                    self.validate_transaction(tx)
+                    self.transaction_tally[tx] = 1
+                except Exception as e:
+                    self.rejection_map[tx] = str(e)
+                    self.transaction_tally[tx] = 0
 
     def finalize_consensus_round(self):
         """Finalizes block and resets state for next round"""
@@ -122,7 +147,7 @@ class Node:
             else:
                 rejected_transactions.append(tx)
                 self.last_round_rejections.add(tx)
-                self.last_round_rejection_reasons = 'TODO'
+                self.last_round_rejection_reasons = self.rejection_map.values()
 
         # finalize block
         self.blockchain.add_block(approved_transactions)
@@ -145,7 +170,9 @@ class Node:
             public_key      RSA public key
         """
         public_key_hash = hash(public_key)
-        return public_key_hash == hash(self.public_key) or public_key_hash in self.node_mapping
+        recognized = public_key_hash == hash(self.public_key) or public_key_hash in self.node_mapping
+        if not recognized:
+            raise UnrecognizedNode('{} is an unrecognized node'.format(hash(public_key)))
 
     def sign_message(self, message):
         """Signs a string or bytes message using the RSA algorithm.
@@ -171,19 +198,22 @@ class BallotClaimTicket:
         return self.id
 
     @staticmethod
-    def is_valid(ticket):
-        if not utils.verify_signature(
-            ticket.get_signature_contents(),
-            ticket.signature, 
-            ticket.node.public_key):
-            ticket.errors = "Invalid ticket signature"
-            return False
-        return True
+    def validate(ticket):
+        try:
+            utils.verify_signature(
+                ticket.get_signature_contents(),
+                ticket.signature, 
+                ticket.node.public_key
+            )
+        except InvalidSignature:
+            ticket.errors = "Invalid ballot claim ticket signature"
+            raise InvalidSignature(ticket.errors)
 
 
 class KeyChangingNodeMixin(object):
     """Injects faulty/adversary behavior in node so that it changes its 
     key pair each time it signs something."""
+    is_adversary = True
 
     def sign_message(self, message):
         self.public_key, self._private_key = utils.get_key_pair()
@@ -205,18 +235,21 @@ class VoterAuthenticationBooth(Node):
         return True if voter_id in self.voter_roll_index else False
 
     def validate_transaction(self, transaction):
-        if not super().validate_transaction(transaction):
-            return False
+        try:
+            super().validate_transaction(transaction)
+        except InvalidSignature as e:
+            raise e
     
         # check that voter is on original voter roll
         voter = transaction.content
         if not voter.id in self.blockchain.current_block.state:
-            return False
+            raise UnknownVoter(
+                '{} ({}) is not on voter roll'.format(voter.id, voter.name)
+            )
 
         # Check blockchain & open transactions that voter has not exceeded alloted claim tickets
         if not self._voter_has_claim_tickets(voter.id):
-            return False
-        return True
+            raise NotEnoughBallotClaimTickets()
 
     def _voter_has_claim_tickets(self, voter_id):
         """
@@ -230,8 +263,12 @@ class VoterAuthenticationBooth(Node):
         return True if claim_tickets_left > 0 else False
 
     def generate_ballot_claim_ticket(self, voter_id):
+        if voter_id == None:
+            raise UnknownVoter()
         if not self._voter_has_claim_tickets(voter_id):
-            raise NotEnoughBallotClaimTickets()
+            raise NotEnoughBallotClaimTickets(
+                '{} does not have enough claim tickets'.format(voter_id)
+            )
         ticket = BallotClaimTicket(self)
         # TODO: increase global counter
         self.create_transaction(self.voter_roll_index[voter_id])
@@ -242,9 +279,32 @@ class VoterAuthenticationBooth(Node):
         self.verified_transactions.add(tx)
         self.broadcast_transactions(tx)
 
+
 class UnrecognizedVoterAuthenticationBooth(KeyChangingNodeMixin,
                                            VoterAuthenticationBooth):
-    pass
+    is_adversary = True
+
+
+class AuthBypassVoterAuthenticationBooth(VoterAuthenticationBooth):
+    is_adversary = True
+    
+    def sign_message(self, message):
+        """Cannot access private key to actually sign"""
+        return message.encode()
+
+    def authenticate_voter(self, voter_id):
+        return True  # bypasses auth
+
+    def _voter_has_claim_tickets(self, voter_id):
+        return True  # allows user to retrieve unlimited claim tickets
+
+    def generate_ballot_claim_ticket(self, voter_id):
+        ticket = BallotClaimTicket(self)
+        # TODO: increase global counter
+        # if voter doesn't exist, create it
+        voter = self.voter_roll_index.get(voter_id, Voter(voter_id or 1, 'Fake voter', 1))
+        self.create_transaction(voter)
+        return ticket
 
 
 class VotingComputer(Node):
@@ -272,8 +332,10 @@ class VotingComputer(Node):
 
     def vote(self, ballot_claim_ticket, **kwargs):
         # pre-voting: authorize claim ticket
-        if not self.validate_ballot_claim_ticket(ballot_claim_ticket):
-            print(ballot_claim_ticket.errors)
+        try:
+            self.validate_ballot_claim_ticket(ballot_claim_ticket)
+        except Exception as e:
+            print(e)
             return
 
         # voting: retrieve and fill out ballot
@@ -285,29 +347,49 @@ class VotingComputer(Node):
             self.create_transaction(ballot_claim_ticket, ballot)
 
     def validate_ballot_claim_ticket(self, ballot_claim_ticket):
-        return BallotClaimTicket.is_valid(ballot_claim_ticket)
+        BallotClaimTicket.validate(ballot_claim_ticket)
 
     def validate_transaction(self, transaction):
-        if not super().validate_transaction(transaction):
-            return False
-
-        # validate ballot claim ticket signature
-        if not BallotClaimTicket.is_valid(transaction.ballot_claim_ticket):
-            return False
+        try:
+            super().validate_transaction(transaction)
+            BallotClaimTicket.validate(transaction.ballot_claim_ticket)
+        except InvalidSignature as e:
+            raise e
 
         # check that ballot claim ticket hasn't been used
         for used_claim_ticket in self.blockchain.ballot_claim_tickets:
             if used_claim_ticket.id == transaction.ballot_claim_ticket.id:
-                return False
-
-        return True
+                raise UsedBallotClaimTicket(
+                    'Ballot claim id {} attempted to be used multiple times'.format(used_claim_ticket.id)
+                )
 
 # TODO- rename to DOSVotingComputer or specific name
 class AdversaryVotingComputer(VotingComputer):
+    is_adversary = True
 
+    '''
     def check_transactions_for_consensus(self, txs):
         pass  # doesn't vote on validity during consensus
+    '''
 
+class InvalidBallotVotingComputer(VotingComputer):
+    """Voting Computer that allows the user to submit arbitrary candidates for 
+    arbitrary positions"""
+    is_adversary = True
+
+    def get_ballot(self):
+        """Overridden to make ballot filling flexible for user"""
+        flexible_ballot = FlexibleBallot(election=self.ballot.election)
+        for position in self.ballot.items:
+            metadata = self.ballot.items[position]
+            flexible_ballot.add_item(
+                position=position,
+                description=metadata['description'],
+                choices=metadata['choices'],
+                max_choices=metadata['max_choices']
+            )
+        flexible_ballot.finalize()
+        return flexible_ballot
 
 
 class Transaction:
@@ -383,7 +465,11 @@ class Transaction:
         Args:
             transaction         transaction to be validated
         """
-        return utils.verify_signature(transaction.get_signature_contents(**transaction.signature_kwargs), transaction.signature, transaction.node.public_key)
+        try:
+            utils.verify_signature(transaction.get_signature_contents(**transaction.signature_kwargs), transaction.signature, transaction.node.public_key)
+        except InvalidSignature as e:
+            public_key = transaction.node.public_key
+            raise InvalidSignature('Invalid signature by public key: {}'.format(hash(public_key)))
 
 
 class BallotTransaction(Transaction):
@@ -422,7 +508,7 @@ class Block:
                 self.state = copy(self.previous_block.state)
             self.apply_transactions()
             self.time = datetime.now()
-            self.hash = self.get_signature_contents()
+            self.hash = self.get_signature_contents()  # TODO: apply hash to this string
             self.header = node.sign_message(self.hash)
 
         def apply_transactions(self):

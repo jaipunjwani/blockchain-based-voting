@@ -5,160 +5,22 @@ import json
 from constants import *
 from datetime import datetime, timedelta
 from base import (VotingComputer, VoterAuthenticationBooth, 
-    UnrecognizedVoterAuthenticationBooth, AdversaryVotingComputer)
+    UnrecognizedVoterAuthenticationBooth, AdversaryVotingComputer,
+    AuthBypassVoterAuthenticationBooth, UnknownVoter)
 from copy import copy, deepcopy
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from exceptions import NotEnoughBallotClaimTickets
+from election import Voter, Ballot
 
 
-class Voter:
-
-    def __init__(self, voter_id, name, num_claim_tickets):
-        self.id = str(voter_id)
-        self.name = name
-        self.num_claim_tickets = num_claim_tickets
-
-    def __repr__(self):
-        return self.name
-
-    def get_signature_contents(self, **kwargs):
-        return "{}:{}".format(str(self.id), self.name)
-
-
-class Ballot:
-    """Ballot for a specific election that can have many ballot items."""
-
-    def __init__(self, election):
-        self.election = election
-        self.items = dict()
-        self.finalized = False
-
-    def get_signature_contents(self, **kwargs):
-        """Returns unique representation of Ballot"""
-        return self.election + str(self.items)
-
-    def add_item(self, position, description, choices, max_choices):
-        if self.finalized:
-            return
-
-        # one unique position per election
-        self.items[position] = {
-            'description': description,
-            'choices': choices,
-            'max_choices': max_choices,
-            'selected': []  # tracks index(es) of selected choices
-        }
-
-    def fill_out(self, selections=None):
-        """
-        selections  {'President': [0], 'Vice President': [1]}
-        """
-        # TODO: review
-
-        if selections:
-            for position in selections:
-                self.select(position, selections[position])
-            return True
-
-        print("Ballot for {}".format(self.election))
-        for position in self.items:
-            metadata = self.items[position]
-            print ("{}: {}".format(position, metadata['description']))
-            for num, choice in enumerate(metadata['choices']):
-                print ("{}. {}".format(num+1, choice))
-
-            max_choices = metadata['max_choices']
-            if max_choices > 1:
-                msg = "Please enter your choice numbers, separated by commas (no more than {} selections): ".format(
-                    max_choices
-                )
-            else:
-                msg = "Please enter your choice number: "
-
-            user_input = input(msg)
-            user_input = user_input.split(",")[:max_choices]  # cap at max_choices
-            selection_indexes = []
-            for selection in user_input:
-                try:
-                    candidate = metadata['choices'][int(selection)-1]
-                    selection_indexes.append(int(selection)-1)
-                except (IndexError, ValueError):
-                    retry = True
-
-            # TODO: handle
-            if not selection_indexes:
-                retry = True
-                pass # need more valid selections
-            if len(selection_indexes) > metadata['max_choices']:
-                retry = True
-                pass # too many choices
-
-            selections = [metadata['choices'][i] for i in selection_indexes]
-            print("Your valid selections: {}".format(selections))
-            confirmation = utils.get_input_of_type(
-                "Enter 'y' to confirm choices or 'n' to clear ballot ",
-                str, allowed_inputs=['y', 'n', 'Y', 'N']
-            ).lower()
-            print()
-            if confirmation == 'n':
-                retry = True # ?
-                self.clear()
-                return False
-            else:
-                self.select(position, selection_indexes)
-        return True    
-
-    def select(self, position, selected):
-        """
-        selected   list of selected index(es) for position
-        """
-        self.items[position]['selected'] = selected
-
-    def unselect(self, position, selected):
-        pass
-
-    def clear(self):
-        """Wipes selections from ballot."""
-        for position in self.items:
-            self.items[position]['selected'] = []
-
-    def finalize(self):
-        """Finalizes ballot items."""
-        self.finalized = True
-
-    @staticmethod
-    def tally(ballots):
-        """
-        {
-            'president': [{'Obama': 1}, {'Bloomberg': 1}],
-            'vice president': [{'Biden': '1'}, {'Tusk': 1}]
-        }
-        """
-        result = {}
-
-        for ballot in ballots:
-            for position in ballot.items:
-                choices = ballot.items[position]['choices']
-                selected = ballot.items[position]['selected']
-                if position not in result:
-                    result[position] = []
-                    for candidate in choices:
-                        result[position].append({candidate: 0})
-
-                for candidate_index in selected:
-                    candidate = choices[candidate_index]
-                    result[position][candidate_index][candidate] += 1
-        return result
-
-
-def create_nodes(NodeClass, *additional_args, num_nodes=0, is_adversary=False):
+def create_nodes(NodeClass, *additional_args, num_nodes=0):
     nodes = []
     for i in range(num_nodes):
         public_key, private_key = utils.get_key_pair()
         args_list = list(additional_args) + [public_key, private_key]
         args = tuple(args_list)
-        node = NodeClass(*args, is_adversary=is_adversary)
+        node = NodeClass(*args)
         nodes.append(node)
     return nodes
 
@@ -187,7 +49,7 @@ class VotingProgram:
         if self.adversarial_mode:
             self.total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
             # TODO: set class, randomize?
-            voter_node_adversary_class = UnrecognizedVoterAuthenticationBooth
+            voter_node_adversary_class = AuthBypassVoterAuthenticationBooth#UnrecognizedVoterAuthenticationBooth
             voting_node_adversary_class = AdversaryVotingComputer
 
 
@@ -281,9 +143,51 @@ class VotingProgram:
             else:
                 hash_agreement[h] = [node]
         num_hashes = len(hash_agreement.keys())
- 
-        # step 2 -- run a consensus round among nodes that have the same hash
+        majority_hash = None
+        majority_nodes_len = 0
+
         for h in hash_agreement:
+            nodes = hash_agreement[h]
+            num_nodes = len(nodes)
+
+            if not majority_hash:
+                majority_nodes_len = num_nodes
+                majority_hash = h
+
+            elif num_nodes > majority_nodes_len:
+                majority_nodes_len = num_nodes
+                majority_hash = h
+
+        if majority_hash:
+            nodes = hash_agreement[majority_hash]
+            for node in nodes:
+                node.begin_consensus_round(nodes=nodes.copy())
+
+            for node in nodes:
+                node.finalize_consensus_round()
+
+            # compile stats for each node per group
+            for node in nodes:
+                if not node.is_adversary:
+                    good_node = node
+                    break
+            node = good_node
+            num_nodes = len(nodes)
+
+            print('Consensus among {} nodes'.format(num_nodes))
+            print('Transactions approved: {}'.format(len(node.last_round_approvals)))
+            rejection_msg = 'Transactions rejected: {}'.format(len(node.rejection_map))#last_round_rejections))
+            if len(node.last_round_rejections) > 0:
+                rejected_reasons = list(set(node.last_round_rejection_reasons))
+                rejection_msg = '{} Reason(s): {}'.format(rejection_msg, rejected_reasons)
+            print(rejection_msg)
+        time.sleep(2)
+
+       
+        # step 2 -- run a consensus round among nodes that have the same hash
+        """
+        for h in hash_agreement:
+            #print("Consensus among blocks with hash {}".format(h))
             nodes = hash_agreement[h]
             for node in nodes:
                 if num_hashes == 1:
@@ -296,22 +200,18 @@ class VotingProgram:
 
             # compile stats for each node per group
             node = nodes[-1]
+            num_nodes = len(nodes)
 
+            print('Consensus among {} nodes'.format(num_nodes))
             print('Transactions approved: {}'.format(len(node.last_round_approvals)))
-            rejection_msg = 'Transactions rejected: {}.'.format(len(node.last_round_rejections))
+            rejection_msg = 'Transactions rejected: {}'.format(len(node.last_round_rejections))
             if len(node.last_round_rejections) > 0:
                 rejection_msg = '{} Reason(s): {}'.format(rejection_msg, node.last_round_rejection_reasons)
             print(rejection_msg)
 
         
         time.sleep(2)
-        '''
-        # step 2 -- achieve consensus on next set of transactions
-        for node in nodes:
-            node.begin_consensus_round()
-        for node in nodes:
-            node.finalize_consensus_round()
-        '''
+        """
 
     def display_header(self):
         if self.adversarial_mode:
@@ -418,12 +318,22 @@ class VotingProgram:
         elif choice == 3:
             self.display_results(nodes_in_sync=False)
         elif choice == 4:
-            pass
+            self.display_logs()
         elif choice == 5:
             return False
         else:
             print("Unrecognized option")
         return True
+
+    def display_logs(self):
+        print('Displaying max 30 lines')
+        log_file = 'logs/node.log'
+        lines = []
+        with open(log_file, 'r') as fh:
+            for line in fh:
+                lines.append(fh.readline().strip())
+        for line in lines[-30:]:
+            print(line)
 
     def _authenticate_voter(self, voter_auth_booth):
         """Authenticates voter and returns voter id (None if voter cannot vote)."""
@@ -454,16 +364,21 @@ class VotingProgram:
 
     def vote(self, **kwargs):
         """Simulates voter's experience at authentication and voter booths."""
+        
+        #voter_auth_booth = random.choice(
+        #    self.voter_authentication_booths[-1:] + self.voter_authentication_booths[:1]
+        #)
         voter_auth_booth = random.choice(self.voter_authentication_booths)
         voter_id = self._authenticate_voter(voter_auth_booth)
-        if not voter_id:
-            return
+        #if not voter_id:
+        #    return
 
         # try to retrieve ballot claim ticket
         try:
             ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter_id)
             print("Retrieved ballot claim ticket. Please proceed to the voting booths.\n")
-        except NotEnoughBallotClaimTickets as e:
+        except (NotEnoughBallotClaimTickets, UnknownVoter) as e:
+            voter_auth_booth.log(e)
             print(e)
             return
 
