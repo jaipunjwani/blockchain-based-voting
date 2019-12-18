@@ -1,3 +1,5 @@
+import utils
+
 class Voter:
 
     def __init__(self, voter_id, name, num_claim_tickets):
@@ -147,8 +149,80 @@ class FlexibleBallot(Ballot):
         self.items[position]['selected'] = selected
     '''
 
-    def fill_out(self):
-        pass
+    def fill_out(self, selections=None):
+        super().fill_out(selections=selections)
+        """
+        selections  {'President': [0], 'Vice President': [1]}
+        """
+        # TODO: review
+        '''
+        if selections:
+            for position in selections:
+                self.select(position, selections[position])
+            return True
+        print("Ballot for {}".format(self.election))
+        for position in self.items:
+            metadata = self.items[position]
+            print ("{}: {}".format(position, metadata['description']))
+            for num, choice in enumerate(metadata['choices']):
+                print ("{}. {}".format(num+1, choice))
+
+            max_choices = metadata['max_choices']
+            if max_choices > 1:
+                msg = "Please enter your choice numbers, separated by commas (no more than {} selections): ".format(
+                    max_choices
+                )
+            else:
+                msg = "Please enter your choice number: "
+
+            user_input = input(msg)
+            user_input = user_input.split(",")[:max_choices]  # cap at max_choices
+            selection_indexes = []
+            for selection in user_input:
+                try:
+                    candidate = metadata['choices'][int(selection)-1]
+                    selection_indexes.append(int(selection)-1)
+                except (IndexError, ValueError):
+                    retry = True
+
+            # TODO: handle
+            if not selection_indexes:
+                retry = True
+                pass # need more valid selections
+            if len(selection_indexes) > metadata['max_choices']:
+                retry = True
+                pass # too many choices
+
+            selections = [metadata['choices'][i] for i in selection_indexes]
+            print("Your valid selections: {}".format(selections))
+            confirmation = utils.get_input_of_type(
+                "Enter 'y' to confirm choices or 'n' to clear ballot ",
+                str, allowed_inputs=['y', 'n', 'Y', 'N']
+            ).lower()
+            print()
+            if confirmation == 'n':
+                retry = True # ?
+                self.clear()
+                return False
+            else:
+                self.select(position, selection_indexes)    
+        '''
+        print('Flexible Ballot -- you can bypass front end and add any candidate / position you would like.\n')
+        # allows user to enter custom ballot item
+        another_candidate = input("If you wish to cast in another candidate please enter his/her name. (Press enter to skip)\n")
+        if another_candidate:
+            new_position = input("Type in position name\n")
+            if new_position in self.items:
+                self.items[new_position]['choices'].append(another_candidate)
+                selected = [len(self.items[new_position]['choices']) - 1]
+            else:
+                choices = [another_candidate]
+                self.add_item(new_position, description='custom user entered', choices=choices, max_choices=1)
+                selected = [0]
+            self.select(new_position, selected)
+        return True
+
+
 
     def finalize(self):
         self.finalized = False  # this ballot is never finalized, you can always add stuff to it

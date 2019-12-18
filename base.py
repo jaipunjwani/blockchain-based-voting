@@ -4,7 +4,7 @@ from constants import *
 import utils
 import random
 from exceptions import (NotEnoughBallotClaimTickets, UnrecognizedNode, 
-    UnknownVoter, UsedBallotClaimTicket)
+    UnknownVoter, UsedBallotClaimTicket, InvalidBallot)
 import logging
 from cryptography.exceptions import InvalidSignature
 from election import FlexibleBallot, Voter
@@ -116,14 +116,14 @@ class Node:
             transactions            iterable of Transactions to check
         """
         for tx in transactions:
-            # check if we have already approved a transaction
             # TODO - check this logic...
             if tx in self.transaction_tally:
                 self.transaction_tally[tx] = self.transaction_tally[tx] + 1
             else:
                 # validate transaction and set tally accordingly
                 try:
-                    self.validate_transaction(tx)
+                    if tx not in self.verified_transactions:
+                        self.validate_transaction(tx)
                     self.transaction_tally[tx] = 1
                 except Exception as e:
                     self.rejection_map[tx] = str(e)
@@ -265,13 +265,14 @@ class VoterAuthenticationBooth(Node):
     def generate_ballot_claim_ticket(self, voter_id):
         if voter_id == None:
             raise UnknownVoter()
+        voter = self.voter_roll_index[voter_id]
         if not self._voter_has_claim_tickets(voter_id):
             raise NotEnoughBallotClaimTickets(
-                '{} does not have enough claim tickets'.format(voter_id)
+                'Voter {} (ID {}) does not have enough claim tickets'.format(voter.name, voter_id)
             )
         ticket = BallotClaimTicket(self)
         # TODO: increase global counter
-        self.create_transaction(self.voter_roll_index[voter_id])
+        self.create_transaction(voter)
         return ticket
 
     def create_transaction(self, voter):
@@ -284,6 +285,8 @@ class UnrecognizedVoterAuthenticationBooth(KeyChangingNodeMixin,
                                            VoterAuthenticationBooth):
     is_adversary = True
 
+#TODO Issue: a lot of the adversary behavior isn't even caught because the 
+# signature fails (since we assume that the adversary cannot sign)
 
 class AuthBypassVoterAuthenticationBooth(VoterAuthenticationBooth):
     is_adversary = True
@@ -363,14 +366,34 @@ class VotingComputer(Node):
                     'Ballot claim id {} attempted to be used multiple times'.format(used_claim_ticket.id)
                 )
 
-# TODO- rename to DOSVotingComputer or specific name
-class AdversaryVotingComputer(VotingComputer):
+        # check that ballot is actually valid
+        self.validate_ballot(transaction.content)
+
+    def validate_ballot(self, ballot):
+        """Checks that ballot selections is in line with expected ballot template"""
+        expected_ballot = self.get_ballot()
+        for position in ballot.items:
+            if position not in expected_ballot.items:
+                msg = 'Position {} is not part of original ballot template'.format(position)
+                self.log(msg)
+                raise InvalidBallot(msg)
+            selected = ballot.items[position]['selected']
+            try:
+                actual_choices = expected_ballot.items[position]['choices']
+                for index in selected:
+                    actual_choices[index]
+            except KeyError as e:
+                msg = 'Ballot for position {} has been tampered with! (extra candidate)'.format(position)
+                self.log(msg)
+                raise InvalidBallot(msg)
+
+
+class DOSVotingComputer(VotingComputer):
     is_adversary = True
 
-    '''
     def check_transactions_for_consensus(self, txs):
         pass  # doesn't vote on validity during consensus
-    '''
+
 
 class InvalidBallotVotingComputer(VotingComputer):
     """Voting Computer that allows the user to submit arbitrary candidates for 
@@ -549,7 +572,10 @@ class BallotBlock(Block):
                 selected = ballot.items[position]['selected']
                 selected_choices = map(lambda n: choices[n], selected)
                 for selection in selected_choices:
-                    self.state[position][selection] += 1
+                    try:
+                        self.state[position][selection] += 1
+                    except KeyError as e:
+                        pass  # log
 
 
 class Blockchain:

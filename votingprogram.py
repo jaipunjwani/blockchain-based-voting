@@ -5,14 +5,15 @@ import json
 from constants import *
 from datetime import datetime, timedelta
 from base import (VotingComputer, VoterAuthenticationBooth, 
-    UnrecognizedVoterAuthenticationBooth, AdversaryVotingComputer,
-    AuthBypassVoterAuthenticationBooth, UnknownVoter)
+    UnrecognizedVoterAuthenticationBooth, DOSVotingComputer,
+    AuthBypassVoterAuthenticationBooth, UnknownVoter, InvalidBallotVotingComputer)
 from copy import copy, deepcopy
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from exceptions import NotEnoughBallotClaimTickets
 from election import Voter, Ballot
 
+#TODO: message for consensus round summary seems to have state that is unreset (transaction reasons)
 
 def create_nodes(NodeClass, *additional_args, num_nodes=0):
     nodes = []
@@ -39,6 +40,8 @@ class VotingProgram:
     def setup(self, 
               adversarial_mode=False, 
               consensus_round_interval=DEFAULT_CONSENSUS_ROUND_INTERVAL,
+              voter_node_adversary_class=None,
+              voting_node_adversary_class=None,
               total_nodes=50):
         self.adversarial_mode = adversarial_mode
         self.consensus_round_interval = consensus_round_interval
@@ -49,22 +52,21 @@ class VotingProgram:
         if self.adversarial_mode:
             self.total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
             # TODO: set class, randomize?
-            voter_node_adversary_class = AuthBypassVoterAuthenticationBooth#UnrecognizedVoterAuthenticationBooth
-            voting_node_adversary_class = AdversaryVotingComputer
-
+            voter_node_adversary_class = AuthBypassVoterAuthenticationBooth #UnrecognizedVoterAuthenticationBooth
+            voting_node_adversary_class = DOSVotingComputer #InvalidBallotVotingComputer
 
         # set up election with ballot template
         self.ballot = Ballot(election='U.S. 2020 Federal Election')
         self.ballot.add_item(
             position='President', 
             description='Head of executive branch', 
-            choices=['Obama(D)', 'Bloomberg(R)'], 
+            choices=['Bloomberg(D)', 'Trump(R)'], 
             max_choices=1
         )
         self.ballot.add_item(
             position='Vice President',
             description='Executive right below President',
-            choices=['Joe Biden(D)', 'Bradley Tusk(R)'],
+            choices=['Joe Biden(D)', 'Mike Pence(R)'],
             max_choices=1
         )
         self.ballot.finalize()
@@ -176,42 +178,12 @@ class VotingProgram:
 
             print('Consensus among {} nodes'.format(num_nodes))
             print('Transactions approved: {}'.format(len(node.last_round_approvals)))
-            rejection_msg = 'Transactions rejected: {}'.format(len(node.rejection_map))#last_round_rejections))
+            rejection_msg = 'Transactions rejected: {}.'.format(len(node.rejection_map))
             if len(node.last_round_rejections) > 0:
-                rejected_reasons = list(set(node.last_round_rejection_reasons))
+                rejected_reasons = list(set(node.rejection_map.values()))
                 rejection_msg = '{} Reason(s): {}'.format(rejection_msg, rejected_reasons)
             print(rejection_msg)
         time.sleep(2)
-
-       
-        # step 2 -- run a consensus round among nodes that have the same hash
-        """
-        for h in hash_agreement:
-            #print("Consensus among blocks with hash {}".format(h))
-            nodes = hash_agreement[h]
-            for node in nodes:
-                if num_hashes == 1:
-                    node.begin_consensus_round()
-                else:
-                    # perform consensus only with nodes in agreement of hash
-                    node.begin_consensus_round(nodes=nodes.copy())
-            for node in nodes:
-                node.finalize_consensus_round()
-
-            # compile stats for each node per group
-            node = nodes[-1]
-            num_nodes = len(nodes)
-
-            print('Consensus among {} nodes'.format(num_nodes))
-            print('Transactions approved: {}'.format(len(node.last_round_approvals)))
-            rejection_msg = 'Transactions rejected: {}'.format(len(node.last_round_rejections))
-            if len(node.last_round_rejections) > 0:
-                rejection_msg = '{} Reason(s): {}'.format(rejection_msg, node.last_round_rejection_reasons)
-            print(rejection_msg)
-
-        
-        time.sleep(2)
-        """
 
     def display_header(self):
         if self.adversarial_mode:
@@ -222,13 +194,13 @@ class VotingProgram:
                 self.total_adversarial_nodes
             )
         )
-        print ("Ballot Blockchain | Normal Nodes: {}\t Adversary Nodes: {}".format(
+        print("Ballot Blockchain | Normal Nodes: {}\t Adversary Nodes: {}".format(
                 len(self.voting_computers) - self.total_adversarial_nodes, 
                 self.total_adversarial_nodes
             )
         )
         next_consensus_round = self.last_time + timedelta(seconds=self.consensus_round_interval)
-        print ("Next consensus round: {}".format(
+        print("Next consensus round: {}".format(
                 next_consensus_round.time().strftime("%H:%M:%S")
             )
         )
@@ -242,16 +214,13 @@ class VotingProgram:
         print ("(5) Exit")
 
     def display_results(self, nodes_in_sync=False):
-        # get results from all nodes in ballot blockchain
-        # TODO: check blockchain results first
-        #self.blockchain.current
-        # extract ballot from transactions that have consensus from network
+        # Displays results from all nodes in ballot blockchain
         print('Displaying results from the blockchain: ')
-        #if nodes_in_sync:
+
         hash_frequency = {}
         num_nodes = len(self.voting_computers)
         hash_to_block = {}
-        # find block that meets minimum consensus requirements
+        # check blockchain for all nodes and find block based on consensus
         for node in self.voting_computers:
             block = node.blockchain.current_block
             if block.hash not in hash_frequency:
@@ -266,45 +235,6 @@ class VotingProgram:
 
         print('Blocks are not in sync. please wait until next consensus round.')
         return
-
-        '''
-        # include majority blockchain state + all node's local transactions that would achieve consensus
-        transaction_tally = {}
-        for node in self.voting_computers:
-            # AGGREGATE all open and verified transactions for all nodes
-            for tx in node.verified_transactions:
-                if tx in transaction_tally:
-                    transaction_tally[tx] += 1
-                else:
-                    transaction_tally[tx] = 1
-
-        approved_transactions = []
-        ballots = []
-        network_size = len(self.voting_computers)
-        for tx, num_approvals in transaction_tally.items():
-            if num_approvals/network_size >= MINIMUM_AGREEMENT_PCT:
-                approved_transactions.append(tx)
-                ballots.append(tx.content)
-        results = Ballot.tally(ballots)
-
-        
-        # add blockchain results to it
-        blockchain_state = self.voting_computers[0].blockchain.current_block.state
-        if not results:
-            print(json.dumps(blockchain_state, indent=4))
-            return
-        else:
-            print('Blockchain results:')
-            print(json.dumps(results, indent=4))
-            print('Pending votes:')
-            print(json.dumps(blockchain_state, indent=4))
-            return
-        for item in blockchain_state:
-            #import ipdb; ipdb.set_trace()
-            for candidate in blockchain_state[item]:
-                results[item][candidate] =+ blockchain_state[item][candidate]
-        print(json.dumps(results, indent=4))
-        '''
 
     def handle_menu_choice(self, choice):
         """
@@ -326,7 +256,7 @@ class VotingProgram:
         return True
 
     def display_logs(self):
-        print('Displaying max 30 lines')
+        print('Displaying last 30 lines')
         log_file = 'logs/node.log'
         lines = []
         with open(log_file, 'r') as fh:
@@ -383,7 +313,8 @@ class VotingProgram:
             return
 
         # vote
-        voting_computer = random.choice(self.voting_computers)
+        #voting_computer = random.choice(self.voting_computers)
+        voting_computer = self.voting_computers[-1]
         voting_computer.vote(ballot_claim_ticket, **kwargs)
 
         # TODO: local global counter
@@ -443,7 +374,7 @@ class Simulation(VotingProgram):
             voter_id = str(voter_id+1)
             name = 'Voter{}'.format(voter_id)
             self.voter_roll.append(Voter(voter_id, name, num_claim_tickets=1))
-            
+
             self.voter_ballot_selections[voter_id] = {}
             for position in self.ballot.items:
                 metadata = self.ballot.items[position]
