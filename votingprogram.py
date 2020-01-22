@@ -4,13 +4,11 @@ import utils
 import json
 from constants import *
 from datetime import datetime, timedelta
-from base import (VotingComputer, VoterAuthenticationBooth, 
-    UnrecognizedVoterAuthenticationBooth, DOSVotingComputer,
-    AuthBypassVoterAuthenticationBooth, UnknownVoter, InvalidBallotVotingComputer)
+from base import (VotingComputer, VoterAuthenticationBooth)
 from copy import copy, deepcopy
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
-from exceptions import NotEnoughBallotClaimTickets
+from exceptions import NotEnoughBallotClaimTickets, UnknownVoter
 from election import Voter, Ballot
 
 #TODO: message for consensus round summary seems to have state that is unreset (transaction reasons)
@@ -47,13 +45,10 @@ class VotingProgram:
         self.consensus_round_interval = consensus_round_interval
         self.total_nodes = total_nodes
         self.total_adversarial_nodes = 0
-        voter_node_adversary_class = None
-        voting_node_adversary_class = None
+        
         if self.adversarial_mode:
+            assert (voter_node_adversary_class or voting_node_adversary_class)
             self.total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
-            # TODO: set class, randomize?
-            voter_node_adversary_class = AuthBypassVoterAuthenticationBooth #UnrecognizedVoterAuthenticationBooth
-            voting_node_adversary_class = DOSVotingComputer #InvalidBallotVotingComputer
 
         # set up election with ballot template
         self.ballot = Ballot(election='U.S. 2020 Federal Election')
@@ -288,27 +283,24 @@ class VotingProgram:
         authenticated = voter_auth_booth.authenticate_voter(voter_id)
 
         if not authenticated:
-            print("{} is not on the voter roll".format(voter))
             return None
         return voter_id
 
     def vote(self, **kwargs):
         """Simulates voter's experience at authentication and voter booths."""
         
+        # TODO
         #voter_auth_booth = random.choice(
         #    self.voter_authentication_booths[-1:] + self.voter_authentication_booths[:1]
         #)
         voter_auth_booth = random.choice(self.voter_authentication_booths)
         voter_id = self._authenticate_voter(voter_auth_booth)
-        #if not voter_id:
-        #    return
 
         # try to retrieve ballot claim ticket
         try:
             ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter_id)
             print("Retrieved ballot claim ticket. Please proceed to the voting booths.\n")
         except (NotEnoughBallotClaimTickets, UnknownVoter) as e:
-            voter_auth_booth.log(e)
             print(e)
             return
 
