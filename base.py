@@ -10,16 +10,22 @@ from cryptography.exceptions import InvalidSignature
 from election import FlexibleBallot, Voter
 
 
+def set_up_logging(name, level=logging.INFO):
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    f_handler = logging.FileHandler('logs/{}.log'.format(name), mode='a')
+    f_handler.setLevel(logging.INFO)
+
+    f_format = logging.Formatter('%(asctime)s Node %(public_key)s: %(message)s')
+    f_handler.setFormatter(f_format)
+
+    logger.addHandler(f_handler)
+
+
+set_up_logging('node')
 logger = logging.getLogger('node')
-logger.setLevel(logging.INFO)
 
-f_handler = logging.FileHandler('logs/node.log', mode='a')
-f_handler.setLevel(logging.INFO)
-
-f_format = logging.Formatter('%(asctime)s Node %(public_key)s: %(message)s')
-f_handler.setFormatter(f_format)
-
-logger.addHandler(f_handler)
 
 class Node:
     """Abstract class for Node that participates in a blockchain"""
@@ -263,17 +269,21 @@ class VoterAuthenticationBooth(Node):
         return True if claim_tickets_left > 0 else False
 
     def generate_ballot_claim_ticket(self, voter_id):
-        if voter_id == None:
-            raise UnknownVoter()
-        voter = self.voter_roll_index[voter_id]
-        if not self._voter_has_claim_tickets(voter_id):
-            raise NotEnoughBallotClaimTickets(
-                'Voter {} (ID {}) does not have enough claim tickets'.format(voter.name, voter_id)
-            )
-        ticket = BallotClaimTicket(self)
-        # TODO: increase global counter
-        self.create_transaction(voter)
-        return ticket
+        try:
+            if voter_id == None:
+                raise UnknownVoter()
+            voter = self.voter_roll_index[voter_id]
+            if not self._voter_has_claim_tickets(voter_id):
+                raise NotEnoughBallotClaimTickets(
+                    'Voter {} (ID {}) does not have enough claim tickets'.format(voter.name, voter_id)
+                )
+            ticket = BallotClaimTicket(self)
+            # TODO: increase global counter
+            self.create_transaction(voter)
+            return ticket
+        except Exception as e:
+            self.log(str(e))
+            raise e
 
     def create_transaction(self, voter):
         tx = VoterTransaction(voter, self, NOT_RETRIEVED_BALLOT, RETRIEVED_BALLOT)
@@ -287,6 +297,7 @@ class UnrecognizedVoterAuthenticationBooth(KeyChangingNodeMixin,
 
 #TODO Issue: a lot of the adversary behavior isn't even caught because the 
 # signature fails (since we assume that the adversary cannot sign)
+
 
 class AuthBypassVoterAuthenticationBooth(VoterAuthenticationBooth):
     is_adversary = True
@@ -408,10 +419,9 @@ class InvalidBallotVotingComputer(VotingComputer):
             flexible_ballot.add_item(
                 position=position,
                 description=metadata['description'],
-                choices=metadata['choices'],
+                choices=deepcopy(metadata['choices']),  # create independent copy
                 max_choices=metadata['max_choices']
             )
-        flexible_ballot.finalize()
         return flexible_ballot
 
 

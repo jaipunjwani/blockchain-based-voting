@@ -1,10 +1,14 @@
+import logging
 from utils import get_input_of_type
 from votingprogram import VotingProgram, Simulation
+from base import (UnrecognizedVoterAuthenticationBooth, AuthBypassVoterAuthenticationBooth,
+    DOSVotingComputer, InvalidBallotVotingComputer)
 
 def main():
-    """Entry point of program, in which user gets to run election in (1) adversarial mode, which demonstrates 
-    dishonest behavior from up to 20% of the nodes, or (2) normal mode, which runs a clean election. The 
-    former is used to assert the validity of our approach by showing that dishonest behavior is detected.
+    """Entry point of program, in which user gets to run election in Normal mode or Simulation mode.
+    Both modes support an additional adversarial flag, which introduces malicious behavior for up to
+    20% of the nodes. Adversaries in the system can be used to show that our approach works with the
+    aforementioned tolerance level of faulty nodes. 
     """
     simulation = input('Enter -1 for simulation, or anything else for main program.')
     simulation = True if simulation == '-1' else False
@@ -17,7 +21,12 @@ def main():
     # TODO: simulation supports a few types of adversaries and the regular voting program supports all
     
     print("Setting up election...")
-    program.setup(adversarial_mode=adversarial_mode, consensus_round_interval=consensus_round_interval)
+    program.setup(
+        adversarial_mode=adversarial_mode, 
+        consensus_round_interval=consensus_round_interval,
+        voter_node_adversary_class=None,
+        voting_node_adversary_class=None
+    )
     input('Set up complete. Press enter to begin election\n')
     program.begin_program()
 

@@ -7,9 +7,12 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 
 def get_key_pair(key_size=512):
+    """
+    Returns (public key, private key) pair with default key size of 512 bytes.
+    """
     private_key = rsa.generate_private_key(
             public_exponent=65537,
-            key_size=512,
+            key_size=key_size,
             backend=default_backend()
         )
     public_key = private_key.public_key()
@@ -19,7 +22,7 @@ def get_key_pair(key_size=512):
 def sign(message, private_key):
     """Signs a message with an RSA private key.
     Args:
-        message             string or bytes message to sign
+        message             string or bytes to sign
         private_key         RSA private key
     """
     if type(message) == str:
