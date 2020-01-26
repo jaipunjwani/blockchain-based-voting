@@ -154,6 +154,8 @@ class FlexibleBallot(Ballot):
         if not filled_out:
             return False
 
+        # TODO: handle selections for simulation
+
         # allow voter to enter custom ballot item
         print('Flexible Ballot -- you can bypass front end and add any candidate / position you would like.\n')
         another_candidate = input("If you wish to write in an additional candidate or vote please enter his/her name. (Press enter to skip)\n")

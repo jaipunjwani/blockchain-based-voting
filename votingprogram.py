@@ -11,16 +11,16 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from exceptions import NotEnoughBallotClaimTickets, UnknownVoter
 from election import Voter, Ballot
 
-#TODO: message for consensus round summary seems to have state that is unreset (transaction reasons)
 
 def create_nodes(NodeClass, *additional_args, num_nodes=0):
     nodes = []
-    for i in range(num_nodes):
-        public_key, private_key = utils.get_key_pair()
-        args_list = list(additional_args) + [public_key, private_key]
-        args = tuple(args_list)
-        node = NodeClass(*args)
-        nodes.append(node)
+    if NodeClass:
+        for i in range(num_nodes):
+            public_key, private_key = utils.get_key_pair()
+            args_list = list(additional_args) + [public_key, private_key]
+            args = tuple(args_list)
+            node = NodeClass(*args)
+            nodes.append(node)
     return nodes
 
 
@@ -44,11 +44,17 @@ class VotingProgram:
         self.adversarial_mode = adversarial_mode
         self.consensus_round_interval = consensus_round_interval
         self.total_nodes = total_nodes
-        self.total_adversarial_nodes = 0
+        total_adversarial_nodes = 0
+        self.total_voter_node_adversarial_nodes = 0
+        self.total_voting_node_adversarial_nodes = 0
         
         if self.adversarial_mode:
             assert (voter_node_adversary_class or voting_node_adversary_class)
-            self.total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
+            total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
+            if voter_node_adversary_class:
+                self.total_voter_node_adversarial_nodes = total_adversarial_nodes
+            if voting_node_adversary_class:
+                self.total_voting_node_adversarial_nodes = total_adversarial_nodes
 
         # set up election with ballot template
         self.ballot = Ballot(election='U.S. 2020 Federal Election')
@@ -69,8 +75,8 @@ class VotingProgram:
         # load voter roll from file/configuration
         self.load_voter_roll()
 
-        # initialize regular nodes
-        num_nodes = self.total_nodes - self.total_adversarial_nodes
+        # initialize regular nodes_in_sync
+        num_nodes = self.total_nodes - total_adversarial_nodes
         self.voting_computers = create_nodes(
             VotingComputer, self.ballot, num_nodes=num_nodes
         )
@@ -78,12 +84,12 @@ class VotingProgram:
             VoterAuthenticationBooth, self.voter_roll, num_nodes=num_nodes
         )
 
-        # initialize adversary nodes
+        # initialize adversary nodes (defaults to 0 nodes)
         self.voting_computers += (
-            create_nodes(voting_node_adversary_class, self.ballot, num_nodes=self.total_adversarial_nodes)
+            create_nodes(voting_node_adversary_class, self.ballot, num_nodes=total_adversarial_nodes)
         )
         self.voter_authentication_booths += (
-            create_nodes(voter_node_adversary_class, self.voter_roll, num_nodes=self.total_adversarial_nodes)
+            create_nodes(voter_node_adversary_class, self.voter_roll, num_nodes=total_adversarial_nodes)
         )
 
         # construct copy of PKI and add to all nodes
@@ -176,6 +182,7 @@ class VotingProgram:
             rejection_msg = 'Transactions rejected: {}.'.format(len(node.rejection_map))
             if len(node.last_round_rejections) > 0:
                 rejected_reasons = list(set(node.rejection_map.values()))
+                #TODO: message for consensus round summary seems to have state that is unreset (transaction reasons)
                 rejection_msg = '{} Reason(s): {}'.format(rejection_msg, rejected_reasons)
             print(rejection_msg)
         time.sleep(2)
@@ -184,14 +191,15 @@ class VotingProgram:
         if self.adversarial_mode:
             print("ADVERSARIAL mode")
         print ("{}".format(self.ballot.election))
+        # TODO: split up adversary nodes per blockchain since they may not be the same
         print ("Voter Blockchain  | Normal Nodes: {}\t Adversary Nodes: {}".format(
-                len(self.voter_authentication_booths) - self.total_adversarial_nodes, 
-                self.total_adversarial_nodes
+                len(self.voter_authentication_booths) - self.total_voter_node_adversarial_nodes, 
+                self.total_voter_node_adversarial_nodes
             )
         )
         print("Ballot Blockchain | Normal Nodes: {}\t Adversary Nodes: {}".format(
-                len(self.voting_computers) - self.total_adversarial_nodes, 
-                self.total_adversarial_nodes
+                len(self.voting_computers) - self.total_voting_node_adversarial_nodes, 
+                self.total_voting_node_adversarial_nodes
             )
         )
         next_consensus_round = self.last_time + timedelta(seconds=self.consensus_round_interval)
@@ -313,6 +321,7 @@ class VotingProgram:
         self.num_voters_voted+=1
 
     def is_election_over(self):
+        # TODO: counter increases even if vote fails..rectify
         # check for consensus among global counters from all nodes
         if self.num_voters_voted >= len(self.voter_roll):
             return True
@@ -367,6 +376,7 @@ class Simulation(VotingProgram):
             name = 'Voter{}'.format(voter_id)
             self.voter_roll.append(Voter(voter_id, name, num_claim_tickets=1))
 
+            # preset voter selections for simulation
             self.voter_ballot_selections[voter_id] = {}
             for position in self.ballot.items:
                 metadata = self.ballot.items[position]
