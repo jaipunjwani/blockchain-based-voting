@@ -270,51 +270,52 @@ class VotingProgram:
 
     def _authenticate_voter(self, voter_auth_booth):
         """Authenticates voter and returns voter id (None if voter cannot vote)."""
-        voter = utils.get_input_of_type(
+        voter_name = utils.get_input_of_type(
             "Please authenticate yourself by typing in your full name.\n",
             str
         ).lower()
         voter_id = None
+        voter = None
 
-        voters = self.get_voter_by_name(voter)
+        voters = self.get_voter_by_name(voter_name)
         if len(voters) > 1:
             voter_id = utils.get_input_of_type(
-                "Multiple matches found for {}. Please enter in your voter id.\n".format(voter),
+                "Multiple matches found for {}. Please enter in your voter id.\n".format(voter_name),
                 str
             )
-            if voter_id not in [v.id for v in voters]:
+            for v in voters:
+                if v.id == voter_id:
+                    voter = v
+                    break
+            if not voter:
                 print("Please look up your ID and try again.")
                 return None
         elif len(voters) == 1:
+            voter = voters[0]
             voter_id = voters[0].id
 
-        authenticated = voter_auth_booth.authenticate_voter(voter_id)
+        authenticated = voter_auth_booth.authenticate_voter(voter)
 
         if not authenticated:
             return None
-        return voter_id
+        return voter
 
     def vote(self, **kwargs):
         """Simulates voter's experience at authentication and voter booths."""
-        
-        # TODO
-        #voter_auth_booth = random.choice(
-        #    self.voter_authentication_booths[-1:] + self.voter_authentication_booths[:1]
-        #)
         voter_auth_booth = random.choice(self.voter_authentication_booths)
-        voter_id = self._authenticate_voter(voter_auth_booth)
+        voter = kwargs.pop('voter', None)
+        voter = voter or self._authenticate_voter(voter_auth_booth)
 
         # try to retrieve ballot claim ticket
         try:
-            ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter_id)
+            ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter)
             print("Retrieved ballot claim ticket. Please proceed to the voting booths.\n")
         except (NotEnoughBallotClaimTickets, UnknownVoter) as e:
             print(e)
             return
 
         # vote
-        #voting_computer = random.choice(self.voting_computers)
-        voting_computer = self.voting_computers[-1]
+        voting_computer = random.choice(self.voting_computers)
         voting_computer.vote(ballot_claim_ticket, **kwargs)
 
         # TODO: local global counter
@@ -386,9 +387,18 @@ class Simulation(VotingProgram):
                     selected = [1]
                 self.voter_ballot_selections[voter_id][position] = selected
 
-    def setup(self, *args, num_voters=100, **kwargs):
+    def setup(self, *args, num_voters=100, num_unregistered_voters=0, **kwargs):
         self.num_voters = num_voters
+        self.num_unregistered_voters = num_unregistered_voters
         super().setup(*args, **kwargs)
+
+        self.unregistered_voters = []
+        unregistered_voter_name_str = 'UnknownVoter{}'
+        id_str = 'anon{}'
+        for i in range(self.num_unregistered_voters):
+            self.unregistered_voters.append(
+                Voter(id_str.format(i+1), unregistered_voter_name_str.format(i+1), num_claim_tickets=None)
+            )
 
     def begin_program(self):
         """
@@ -400,10 +410,11 @@ class Simulation(VotingProgram):
     
         utils.clear_screen()
         self.display_header()
-        
-        for voter in self.voter_roll:
+
+        # space out unregistered voters and registered voters
+        for voter in self.generate_voters():
             # get voter's pre-configured choices
-            self.vote(selections=self.voter_ballot_selections[voter.id])
+            self.vote(voter=voter, selections=self.voter_ballot_selections.get(voter.id))
 
             if self.is_consensus_round():
                 self.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')
@@ -418,6 +429,30 @@ class Simulation(VotingProgram):
         print("Election over! Results: ")
         self.display_results(nodes_in_sync=True)
 
+    def generate_voters(self):
+        """Generate sequence of voters from voter roll & any unregistered voters for the simulation"""
+        if self.unregistered_voters:
+            return self.voter_roll + self.unregistered_voters
+        else:
+            return self.voter_roll
+        '''
+        unregistered_voters = bool(self.unregistered_voters)
+        if unregistered_voters:
+            unregistered_voter_index = 0
+            interval = int(len(self.voter_roll) / len(self.unregistered_voters))
+            i = 0
+        for voter in self.voter_roll:
+            if unregistered_voters:
+                if i == interval:
+                    yield self.unregistered_voters[unregistered_voter_index]
+                    unregistered_voter_index += 1
+                    i = 0
+                else:
+                    i += 1
+            else:
+                yield voter
+        '''
+
     def display_menu(self):
         print('Simulating voting process')
 
@@ -428,10 +463,10 @@ class Simulation(VotingProgram):
         while self.current_voter_index < len(self.voter_roll):
             voter = self.voter_roll[self.current_voter_index]
             self.current_voter_index += 1
-            authenticated = voter_auth_booth.authenticate_voter(voter.id)
+            authenticated = voter_auth_booth.authenticate_voter(voter)
             if not authenticated:
                 print('Voter {} is not on voter roll'.format(voter.name))
                 return None
             else:
                 print('Authenticated voter {}'.format(voter.name))
-                return voter.id
+                return voter

@@ -237,8 +237,10 @@ class VoterAuthenticationBooth(Node):
         self.blockchain = VoterBlockchain(self)
         self.blockchain.create_genesis_block(self.voter_roll)
 
-    def authenticate_voter(self, voter_id):
-        return True if voter_id in self.voter_roll_index else False
+    def authenticate_voter(self, voter):
+        if voter and voter.id in self.voter_roll_index:
+            return True
+        return False
 
     def validate_transaction(self, transaction):
         try:
@@ -268,14 +270,15 @@ class VoterAuthenticationBooth(Node):
                 claim_tickets_left -= 1
         return True if claim_tickets_left > 0 else False
 
-    def generate_ballot_claim_ticket(self, voter_id):
+    def generate_ballot_claim_ticket(self, voter):
         try:
-            if voter_id == None:
+            if voter == None:
                 raise UnknownVoter()
-            voter = self.voter_roll_index[voter_id]
-            if not self._voter_has_claim_tickets(voter_id):
+            if voter not in self.voter_roll:
+                raise UnknownVoter('{} not on voter roll'.format(voter.name))
+            if not self._voter_has_claim_tickets(voter.id):
                 raise NotEnoughBallotClaimTickets(
-                    'Voter {} (ID {}) does not have enough claim tickets'.format(voter.name, voter_id)
+                    'Voter {} (ID {}) does not have enough claim tickets'.format(voter.name, voter.id)
                 )
             ticket = BallotClaimTicket(self)
             # TODO: increase global counter
@@ -312,11 +315,9 @@ class AuthBypassVoterAuthenticationBooth(VoterAuthenticationBooth):
     def _voter_has_claim_tickets(self, voter_id):
         return True  # allows user to retrieve unlimited claim tickets
 
-    def generate_ballot_claim_ticket(self, voter_id):
+    def generate_ballot_claim_ticket(self, voter):
         ticket = BallotClaimTicket(self)
         # TODO: increase global counter
-        # if voter doesn't exist, create it
-        voter = self.voter_roll_index.get(voter_id, Voter(voter_id or 1, 'Fake voter', 1))
         self.create_transaction(voter)
         return ticket
 
