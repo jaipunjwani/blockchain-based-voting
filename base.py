@@ -272,10 +272,12 @@ class VoterAuthenticationBooth(Node):
 
     def generate_ballot_claim_ticket(self, voter):
         try:
-            if voter == None:
-                raise UnknownVoter()
-            if voter not in self.voter_roll:
-                raise UnknownVoter('{} not on voter roll'.format(voter.name))
+            if not self.authenticate_voter(voter):
+                if voter:
+                    raise UnknownVoter('{} not on voter roll'.format(voter.name))
+                else:
+                    raise UnknownVoter()
+
             if not self._voter_has_claim_tickets(voter.id):
                 raise NotEnoughBallotClaimTickets(
                     'Voter {} (ID {}) does not have enough claim tickets'.format(voter.name, voter.id)
@@ -309,7 +311,7 @@ class AuthBypassVoterAuthenticationBooth(VoterAuthenticationBooth):
         """Cannot access private key to actually sign"""
         return message.encode()
 
-    def authenticate_voter(self, voter_id):
+    def authenticate_voter(self, voter):
         return True  # bypasses auth
 
     def _voter_has_claim_tickets(self, voter_id):

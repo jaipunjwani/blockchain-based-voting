@@ -18,7 +18,7 @@ def main():
     simulation_map = {
         1: {'description': 'Valid voters casting valid votes', 'adversarial': False},
         2: {'description': 'Unknown voter attempting to cast vote', 'adversarial': False, 'kwargs': {'num_unregistered_voters': 10}},
-        3: {'description': 'Valid voter attempting to cast extra vote', 'adversarial': False},
+        3: {'description': 'Valid voter attempting to cast extra vote', 'adversarial': False, 'kwargs': {'num_double_voting_voters': 5}},  # voter will vote twice so effectively 10 voters
         # note about 4: this isn't necessarily an adversarial scenario, but we choose to treat it as one here.
         4: {'description': 'Valid voters attempting to cast invalid vote', 'adversarial': True, 'kwargs': {'voting_node_adversary_class': InvalidBallotVotingComputer}},
         5: {'description': 'Node broadcasting invalid transaction', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': UnrecognizedVoterAuthenticationBooth}},
