@@ -396,15 +396,9 @@ class Simulation(VotingProgram):
                 Voter(id_str.format(i+1), unregistered_voter_name_str.format(i+1), num_claim_tickets=0)
             )
 
-        self.double_voting_voters = self.voter_roll[-1*self.num_double_voting_voters:]
-        '''
-        double_voting_voter_str = 'DoubleVotingVoter{}'
-        id_str = 'doublevoter{}'
-        for i in range(2*self.num_double_voting_voters):
-            self.double_voting_voters.append(
-                Voter(id_str.format(i+1), double_voting_voter_str.format(i+1), num_claim_tickets=1)
-            )
-        '''
+        self.double_voting_voters = []
+        if self.num_double_voting_voters:
+            self.double_voting_voters = self.voter_roll[-1*self.num_double_voting_voters:]
 
     def begin_program(self):
         """
