@@ -4,7 +4,7 @@ class BaseException(Exception):
     def __init__(self, *args, **kwargs):
         if not (args or kwargs): 
             args = (self.default_message,)
-        super().__init__(*args, **kwargs) 
+        super().__init__(*args, **kwargs)
 
 
 class NotEnoughBallotClaimTickets(BaseException):

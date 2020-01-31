@@ -1,0 +1,16 @@
+[
+    {
+        "name": "Kees Leune", 
+        "num_claim_tickets": 1, 
+        "selections": {"President": [], "Vice President": []}
+    },
+    {
+        "name": "Jai Punjwani", 
+        "num_claim_tickets": 1,
+        "selections": {"President": [], "Vice President": []}
+    },
+    {
+        "name": "Jai Punjwani", 
+        "num_claim_tickets": 1
+    }
+]
