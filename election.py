@@ -39,7 +39,7 @@ class Ballot:
             'selected': []  # tracks index(es) of selected choices
         }
 
-    def fill_out(self, selections=None):
+    def fill_out(self, selections=None, **kwargs):
         """
         selections  pre-determined selections (used by simulation/adversaries)
                       ex: {'President': [0], 'Vice President': [1]}
@@ -47,7 +47,7 @@ class Ballot:
         Returns whether or not ballot was filled out. This determines whether or not
         a transaction will be created. 
 
-        Future enhancement: Implment retry mechanism, allowing ballots to be invalidated.
+        Future enhancement: Implement retry mechanism, allowing ballots to be invalidated.
         To do this, we would have to support invalidating claim tickets and allowing the
         voter to claim another ticket in its stead.
         """
@@ -149,26 +149,42 @@ class Ballot:
 class FlexibleBallot(Ballot):
     """Flexible ballot that allows arbitrary candidates to be added for arbitrary positions."""
 
-    def fill_out(self, selections=None):
+    def fill_out(self, selections=None, additional_selections=None):
+        """
+        additional_selections    additional positions w/ single candidate to add to ballot. should be
+                                   in form [{'position': 'prez', 'candidate': 'jai punjwani'}]
+        """
         filled_out = super().fill_out(selections=selections)
         if not filled_out:
             return False
 
         # allow voter to enter custom ballot item
         print('Flexible Ballot -- you can bypass front end and add any candidate / position you would like.\n')
-        another_candidate = input("If you wish to write in an additional candidate or vote please enter his/her name. (Press enter to skip)\n")
-        if another_candidate:
-            position = input("Type in position name\n")
-            if position in self.items:
-                # add candidate as a possible choice
-                self.items[position]['choices'].append(another_candidate)
-                selected = [len(self.items[position]['choices']) - 1]  # disregards previous selections, if any
-            else:
-                # create new position altogether
-                choices = [another_candidate]
-                self.add_item(position, description='custom user entered', choices=choices, max_choices=1)
+        if additional_selections:
+            for selection in additional_selections:
+                self.add_item(
+                    selection['position'], 
+                    description='new position from simulation', 
+                    choices=[selection['candidate']], 
+                    max_choices=1
+                )
+                print('Writing in position: {}'.format(selection['position']))
                 selected = [0]
-            self.select(position, selected)
+                self.select(selection['position'], selected)
+        else:
+            another_candidate = input("If you wish to write in an additional candidate or vote please enter his/her name. (Press enter to skip)\n")
+            if another_candidate:
+                position = input("Type in position name\n")
+                if position in self.items:
+                    # add candidate as a possible choice
+                    self.items[position]['choices'].append(another_candidate)
+                    selected = [len(self.items[position]['choices']) - 1]  # disregards previous selections, if any
+                else:
+                    # create new position altogether
+                    choices = [another_candidate]
+                    self.add_item(position, description='custom user entered', choices=choices, max_choices=1)
+                    selected = [0]
+                self.select(position, selected)
         return True
 
     def finalize(self):

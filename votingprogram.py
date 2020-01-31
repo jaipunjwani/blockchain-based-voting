@@ -11,16 +11,16 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from exceptions import NotEnoughBallotClaimTickets, UnknownVoter
 from election import Voter, Ballot
 
-#TODO: message for consensus round summary seems to have state that is unreset (transaction reasons)
 
 def create_nodes(NodeClass, *additional_args, num_nodes=0):
     nodes = []
-    for i in range(num_nodes):
-        public_key, private_key = utils.get_key_pair()
-        args_list = list(additional_args) + [public_key, private_key]
-        args = tuple(args_list)
-        node = NodeClass(*args)
-        nodes.append(node)
+    if NodeClass:
+        for i in range(num_nodes):
+            public_key, private_key = utils.get_key_pair()
+            args_list = list(additional_args) + [public_key, private_key]
+            args = tuple(args_list)
+            node = NodeClass(*args)
+            nodes.append(node)
     return nodes
 
 
@@ -44,11 +44,17 @@ class VotingProgram:
         self.adversarial_mode = adversarial_mode
         self.consensus_round_interval = consensus_round_interval
         self.total_nodes = total_nodes
-        self.total_adversarial_nodes = 0
+        total_adversarial_nodes = 0
+        self.total_voter_node_adversarial_nodes = 0
+        self.total_voting_node_adversarial_nodes = 0
         
         if self.adversarial_mode:
             assert (voter_node_adversary_class or voting_node_adversary_class)
-            self.total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
+            total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
+            if voter_node_adversary_class:
+                self.total_voter_node_adversarial_nodes = total_adversarial_nodes
+            if voting_node_adversary_class:
+                self.total_voting_node_adversarial_nodes = total_adversarial_nodes
 
         # set up election with ballot template
         self.ballot = Ballot(election='U.S. 2020 Federal Election')
@@ -69,8 +75,8 @@ class VotingProgram:
         # load voter roll from file/configuration
         self.load_voter_roll()
 
-        # initialize regular nodes
-        num_nodes = self.total_nodes - self.total_adversarial_nodes
+        # initialize regular nodes_in_sync
+        num_nodes = self.total_nodes - total_adversarial_nodes
         self.voting_computers = create_nodes(
             VotingComputer, self.ballot, num_nodes=num_nodes
         )
@@ -78,12 +84,12 @@ class VotingProgram:
             VoterAuthenticationBooth, self.voter_roll, num_nodes=num_nodes
         )
 
-        # initialize adversary nodes
+        # initialize adversary nodes (defaults to 0 nodes)
         self.voting_computers += (
-            create_nodes(voting_node_adversary_class, self.ballot, num_nodes=self.total_adversarial_nodes)
+            create_nodes(voting_node_adversary_class, self.ballot, num_nodes=total_adversarial_nodes)
         )
         self.voter_authentication_booths += (
-            create_nodes(voter_node_adversary_class, self.voter_roll, num_nodes=self.total_adversarial_nodes)
+            create_nodes(voter_node_adversary_class, self.voter_roll, num_nodes=total_adversarial_nodes)
         )
 
         # construct copy of PKI and add to all nodes
@@ -173,25 +179,27 @@ class VotingProgram:
 
             print('Consensus among {} nodes'.format(num_nodes))
             print('Transactions approved: {}'.format(len(node.last_round_approvals)))
-            rejection_msg = 'Transactions rejected: {}.'.format(len(node.rejection_map))
+            rejection_msg = 'Transactions rejected: {}'.format(len(node.rejection_map))
             if len(node.last_round_rejections) > 0:
                 rejected_reasons = list(set(node.rejection_map.values()))
+                #TODO: message for consensus round summary seems to have state that is unreset (transaction reasons)
                 rejection_msg = '{} Reason(s): {}'.format(rejection_msg, rejected_reasons)
             print(rejection_msg)
         time.sleep(2)
 
     def display_header(self):
-        if self.adversarial_mode:
-            print("ADVERSARIAL mode")
+        mode = 'ADVERSARIAL MODE' if self.adversarial_mode else 'NORMAL MODE'
+        print (mode)
         print ("{}".format(self.ballot.election))
+        # TODO: split up adversary nodes per blockchain since they may not be the same
         print ("Voter Blockchain  | Normal Nodes: {}\t Adversary Nodes: {}".format(
-                len(self.voter_authentication_booths) - self.total_adversarial_nodes, 
-                self.total_adversarial_nodes
+                len(self.voter_authentication_booths) - self.total_voter_node_adversarial_nodes, 
+                self.total_voter_node_adversarial_nodes
             )
         )
         print("Ballot Blockchain | Normal Nodes: {}\t Adversary Nodes: {}".format(
-                len(self.voting_computers) - self.total_adversarial_nodes, 
-                self.total_adversarial_nodes
+                len(self.voting_computers) - self.total_voting_node_adversarial_nodes, 
+                self.total_voting_node_adversarial_nodes
             )
         )
         next_consensus_round = self.last_time + timedelta(seconds=self.consensus_round_interval)
@@ -261,58 +269,55 @@ class VotingProgram:
             print(line)
 
     def _authenticate_voter(self, voter_auth_booth):
-        """Authenticates voter and returns voter id (None if voter cannot vote)."""
-        voter = utils.get_input_of_type(
+        """Authenticates voter and returns voter object (None if voter cannot vote)."""
+        voter_name = utils.get_input_of_type(
             "Please authenticate yourself by typing in your full name.\n",
             str
         ).lower()
         voter_id = None
+        voter = None
 
-        voters = self.get_voter_by_name(voter)
+        voters = self.get_voter_by_name(voter_name)
         if len(voters) > 1:
             voter_id = utils.get_input_of_type(
-                "Multiple matches found for {}. Please enter in your voter id.\n".format(voter),
+                "Multiple matches found for {}. Please enter in your voter id.\n".format(voter_name),
                 str
             )
-            if voter_id not in [v.id for v in voters]:
+            for v in voters:
+                if v.id == voter_id:
+                    voter = v
+                    break
+            if not voter:
                 print("Please look up your ID and try again.")
                 return None
         elif len(voters) == 1:
+            voter = voters[0]
             voter_id = voters[0].id
-
-        authenticated = voter_auth_booth.authenticate_voter(voter_id)
-
-        if not authenticated:
-            return None
-        return voter_id
+        return voter
 
     def vote(self, **kwargs):
         """Simulates voter's experience at authentication and voter booths."""
-        
-        # TODO
-        #voter_auth_booth = random.choice(
-        #    self.voter_authentication_booths[-1:] + self.voter_authentication_booths[:1]
-        #)
         voter_auth_booth = random.choice(self.voter_authentication_booths)
-        voter_id = self._authenticate_voter(voter_auth_booth)
+        voter = self._authenticate_voter(voter_auth_booth, voter=kwargs.pop('voter', None))
 
         # try to retrieve ballot claim ticket
         try:
-            ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter_id)
+            ballot_claim_ticket = voter_auth_booth.generate_ballot_claim_ticket(voter)
+            print('Authenticated voter {}'.format(voter.name))
             print("Retrieved ballot claim ticket. Please proceed to the voting booths.\n")
         except (NotEnoughBallotClaimTickets, UnknownVoter) as e:
             print(e)
             return
 
         # vote
-        #voting_computer = random.choice(self.voting_computers)
-        voting_computer = self.voting_computers[-1]
+        voting_computer = random.choice(self.voting_computers)
         voting_computer.vote(ballot_claim_ticket, **kwargs)
 
         # TODO: local global counter
         self.num_voters_voted+=1
 
     def is_election_over(self):
+        # TODO: counter increases even if vote fails..rectify
         # check for consensus among global counters from all nodes
         if self.num_voters_voted >= len(self.voter_roll):
             return True
@@ -367,6 +372,7 @@ class Simulation(VotingProgram):
             name = 'Voter{}'.format(voter_id)
             self.voter_roll.append(Voter(voter_id, name, num_claim_tickets=1))
 
+            # preset voter selections for simulation
             self.voter_ballot_selections[voter_id] = {}
             for position in self.ballot.items:
                 metadata = self.ballot.items[position]
@@ -376,9 +382,37 @@ class Simulation(VotingProgram):
                     selected = [1]
                 self.voter_ballot_selections[voter_id][position] = selected
 
-    def setup(self, *args, num_voters=100, **kwargs):
+    def setup(self, *args, 
+        num_voters=100, 
+        num_unregistered_voters=0, 
+        num_double_voting_voters=0, 
+        additional_selections=None,   
+        **kwargs):
+        """
+        num_voters                number of regular voters to simulate
+        num_unregistered_voters   number of unregistered voters to be introduced
+        num_double_voting_voters  number of regular voters who will double vote
+        additional_selections     pre-configured selections for FlexibleBallot
+        """
+        
         self.num_voters = num_voters
+        self.num_unregistered_voters = max(0, num_unregistered_voters)  # separate from main voter roll
+        self.num_double_voting_voters = min(max(0, num_double_voting_voters), num_voters)  # part of main voter roll
         super().setup(*args, **kwargs)
+
+        self.additional_selections = additional_selections
+
+        self.unregistered_voters = []
+        unregistered_voter_name_str = 'UnknownVoter{}'
+        id_str = 'anon{}'
+        for i in range(self.num_unregistered_voters):
+            self.unregistered_voters.append(
+                Voter(id_str.format(i+1), unregistered_voter_name_str.format(i+1), num_claim_tickets=0)
+            )
+
+        self.double_voting_voters = []
+        if self.num_double_voting_voters:
+            self.double_voting_voters = self.voter_roll[-1*self.num_double_voting_voters:]
 
     def begin_program(self):
         """
@@ -390,10 +424,15 @@ class Simulation(VotingProgram):
     
         utils.clear_screen()
         self.display_header()
-        
-        for voter in self.voter_roll:
+
+        # space out unregistered voters and registered voters
+        for voter in self.generate_voters():
             # get voter's pre-configured choices
-            self.vote(selections=self.voter_ballot_selections[voter.id])
+            self.vote(
+                voter=voter, 
+                selections=self.voter_ballot_selections.get(voter.id),
+                additional_selections=self.additional_selections
+            )
 
             if self.is_consensus_round():
                 self.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')
@@ -402,11 +441,22 @@ class Simulation(VotingProgram):
             self.display_header()
 
         input("Press any key to continue")
+        print("Displaying logs")
+        self.display_logs()
+        input('Press enter to see results.')
+        utils.clear_screen()
 
         self.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')
         self.demonstrate_consensus(self.voting_computers, 'Ballot Blockchain')        
         print("Election over! Results: ")
         self.display_results(nodes_in_sync=True)
+
+    def generate_voters(self):
+        """Generate sequence of voters from voter roll & any unregistered voters for the simulation"""
+        voters = self.voter_roll + self.unregistered_voters + self.double_voting_voters
+        return voters
+        # return double voting voters twice
+        #return voters + self.double_voting_voters + self.double_voting_voters
 
     def display_menu(self):
         print('Simulating voting process')
@@ -414,14 +464,10 @@ class Simulation(VotingProgram):
     def get_menu_choice(self):
         return 1  # choice for voting
 
-    def _authenticate_voter(self, voter_auth_booth):
-        while self.current_voter_index < len(self.voter_roll):
+    def _authenticate_voter(self, voter_auth_booth, voter=None):
+        """Return the provided voter object for the simulation, else continue
+        iterating over the voter roll"""
+        if not voter and self.current_voter_index < len(self.voter_roll):
             voter = self.voter_roll[self.current_voter_index]
             self.current_voter_index += 1
-            authenticated = voter_auth_booth.authenticate_voter(voter.id)
-            if not authenticated:
-                print('Voter {} is not on voter roll'.format(voter.name))
-                return None
-            else:
-                print('Authenticated voter {}'.format(voter.name))
-                return voter.id
+        return voter
