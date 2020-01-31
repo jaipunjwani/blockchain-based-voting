@@ -268,7 +268,7 @@ class VotingProgram:
         for line in lines[-30:]:
             print(line)
 
-    def _authenticate_voter(self, voter_auth_booth):
+    def _authenticate_voter(self, voter_auth_booth, **kwargs):
         """Authenticates voter and returns voter object (None if voter cannot vote)."""
         voter_name = utils.get_input_of_type(
             "Please authenticate yourself by typing in your full name.\n",
