@@ -188,8 +188,8 @@ class VotingProgram:
         time.sleep(2)
 
     def display_header(self):
-        if self.adversarial_mode:
-            print("ADVERSARIAL mode")
+        mode = 'ADVERSARIAL MODE' if self.adversarial_mode else 'NORMAL MODE'
+        print (mode)
         print ("{}".format(self.ballot.election))
         # TODO: split up adversary nodes per blockchain since they may not be the same
         print ("Voter Blockchain  | Normal Nodes: {}\t Adversary Nodes: {}".format(
@@ -382,11 +382,25 @@ class Simulation(VotingProgram):
                     selected = [1]
                 self.voter_ballot_selections[voter_id][position] = selected
 
-    def setup(self, *args, num_voters=100, num_unregistered_voters=0, num_double_voting_voters=0, **kwargs):
+    def setup(self, *args, 
+        num_voters=100, 
+        num_unregistered_voters=0, 
+        num_double_voting_voters=0, 
+        additional_selections=None,   
+        **kwargs):
+        """
+        num_voters                number of regular voters to simulate
+        num_unregistered_voters   number of unregistered voters to be introduced
+        num_double_voting_voters  number of regular voters who will double vote
+        additional_selections     pre-configured selections for FlexibleBallot
+        """
+        
         self.num_voters = num_voters
         self.num_unregistered_voters = max(0, num_unregistered_voters)  # separate from main voter roll
         self.num_double_voting_voters = min(max(0, num_double_voting_voters), num_voters)  # part of main voter roll
         super().setup(*args, **kwargs)
+
+        self.additional_selections = additional_selections
 
         self.unregistered_voters = []
         unregistered_voter_name_str = 'UnknownVoter{}'
@@ -414,7 +428,11 @@ class Simulation(VotingProgram):
         # space out unregistered voters and registered voters
         for voter in self.generate_voters():
             # get voter's pre-configured choices
-            self.vote(voter=voter, selections=self.voter_ballot_selections.get(voter.id))
+            self.vote(
+                voter=voter, 
+                selections=self.voter_ballot_selections.get(voter.id),
+                additional_selections=self.additional_selections
+            )
 
             if self.is_consensus_round():
                 self.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')

@@ -300,9 +300,6 @@ class UnrecognizedVoterAuthenticationBooth(KeyChangingNodeMixin,
                                            VoterAuthenticationBooth):
     is_adversary = True
 
-#TODO Issue: a lot of the adversary behavior isn't even caught because the 
-# signature fails (since we assume that the adversary cannot sign)
-
 
 class AuthBypassVoterAuthenticationBooth(VoterAuthenticationBooth):
     is_adversary = True

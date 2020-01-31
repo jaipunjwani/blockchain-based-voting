@@ -20,7 +20,8 @@ def main():
         2: {'description': 'Unknown voter attempting to cast vote', 'adversarial': False, 'kwargs': {'num_unregistered_voters': 10}},
         3: {'description': 'Valid voter attempting to cast extra vote', 'adversarial': False, 'kwargs': {'num_double_voting_voters': 5}},  # voter will vote twice so effectively 10 voters
         # note about 4: this isn't necessarily an adversarial scenario, but we choose to treat it as one here.
-        4: {'description': 'Valid voters attempting to cast invalid vote', 'adversarial': True, 'kwargs': {'voting_node_adversary_class': InvalidBallotVotingComputer}},
+        4: {'description': 'Valid voters attempting to cast invalid vote', 'adversarial': True, 'kwargs': {'voting_node_adversary_class': InvalidBallotVotingComputer, 
+                                                                                                           'additional_selections': [{'position': 'FakePosition', 'candidate': 'Jai Punjwani'}]}},
         5: {'description': 'Node broadcasting invalid transaction', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': UnrecognizedVoterAuthenticationBooth}},
         6: {'description': 'Adversarial node creating invalid claim tickets', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': AuthBypassVoterAuthenticationBooth}},
         7: {'description': 'Adversarial node not participating in consensus round', 'adversarial': True, 'kwargs': {'voting_node_adversary_class': DOSVotingComputer}},
@@ -43,6 +44,8 @@ def main():
                 print('Wrong index. Defaulting to (1)')
                 simulation_number = 1
             setup_kwargs.update(simulation.get('kwargs', {}))
+            if simulation_number == 8:
+                print('Custom mode is for future development.')
         except KeyError:
             print ("Wrong index. Defaulting to (1)")
             simulation_number = 1
