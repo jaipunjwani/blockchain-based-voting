@@ -49,7 +49,8 @@ class VotingProgram:
         self.total_voting_node_adversarial_nodes = 0
         
         if self.adversarial_mode:
-            assert (voter_node_adversary_class or voting_node_adversary_class)
+            if not (voter_node_adversary_class or voting_node_adversary_class):
+                exit('Adversarial mode requires an adversary class to be chosen')
             total_adversarial_nodes = int((1-MINIMUM_AGREEMENT_PCT) * self.total_nodes) - 1
             if voter_node_adversary_class:
                 self.total_voter_node_adversarial_nodes = total_adversarial_nodes
@@ -61,7 +62,7 @@ class VotingProgram:
         self.ballot.add_item(
             position='President', 
             description='Head of executive branch', 
-            choices=['Bloomberg(D)', 'Trump(R)'], 
+            choices=['Mike Bloomberg(D)', 'Donald Trump(R)'], 
             max_choices=1
         )
         self.ballot.add_item(

@@ -45,7 +45,7 @@ def main():
                 simulation_number = 1
             setup_kwargs.update(simulation.get('kwargs', {}))
             if simulation_number == 8:
-                print('Custom mode is for future development.')
+                exit('Custom mode is for future development.')
         except KeyError:
             print ("Wrong index. Defaulting to (1)")
             simulation_number = 1
@@ -53,7 +53,32 @@ def main():
     # adversarial in normal program mode 
     elif adversarial_mode:
         # prompt user to select adversary of choice
-        pass
+        voting_node_key = 'voting_node_adversary_class'
+        voter_node_key = 'voter_node_adversary_class'
+        adversary_classes = {
+            voter_node_key: [UnrecognizedVoterAuthenticationBooth, AuthBypassVoterAuthenticationBooth],
+            voting_node_key: [InvalidBallotVotingComputer, DOSVotingComputer]
+        }
+
+        blockchain_names = {
+            voter_node_key: 'Voter Blockchain',
+            voting_node_key: 'Ballot Blockchain'
+        }
+
+        for i, blockchain_key in enumerate([voter_node_key, voting_node_key]):
+            blockchain_name = blockchain_names[blockchain_key]
+            _input = input('Enter {} for {} or anything else to skip.\n'.format(i, blockchain_name))
+            if _input == str(i):
+                for index, adversary_class in enumerate(adversary_classes[blockchain_key]):
+                    print ('({}) {}'.format(index, adversary_class.__name__))
+                node_index = int(input('Choose an adversary node.'))
+                try:
+                    setup_kwargs.update(
+                        {blockchain_key: adversary_classes[blockchain_key][node_index]}
+                    )
+                except (TypeError, KeyError) as e:
+                    print('Invalid index. exiting..')
+                    exit()
 
     program = Simulation() if simulation_mode else VotingProgram()
     consensus_round_interval = 6 if simulation_mode else 30

@@ -11,7 +11,7 @@ The system allows users to provide their own voter roll by modifying `voter_roll
 - logging (machine logs emulate realistic system messages that is part of the system's auditing)
 
 ### Requirements
-Python 3, pip
+Python 3.5+, pip
 
 ### How to Run
 pip install the dependencies from `requirements.txt` (ideally in a virtual environment).
