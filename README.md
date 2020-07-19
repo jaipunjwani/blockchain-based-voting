@@ -15,4 +15,4 @@ Python 3.5+, pip
 
 ### How to Run
 pip install the dependencies from `requirements.txt` (ideally in a virtual environment).
-Then run python `main.py`
+Then run `python main.py`
