@@ -5,9 +5,10 @@ import utils
 import random
 from exceptions import (NotEnoughBallotClaimTickets, UnrecognizedNode, 
     UnknownVoter, UsedBallotClaimTicket, InvalidBallot)
+from consensus import ConsensusParticipant
 import logging
 from cryptography.exceptions import InvalidSignature
-from election import FlexibleBallot, Voter
+import utils
 
 
 def set_up_logging(name, level=logging.INFO):
@@ -21,13 +22,157 @@ def set_up_logging(name, level=logging.INFO):
     f_handler.setFormatter(f_format)
 
     logger.addHandler(f_handler)
+    return logger
+
+logger = set_up_logging('node')
 
 
-set_up_logging('node')
-logger = logging.getLogger('node')
+class Voter:
+
+    def __init__(self, voter_id, name, num_claim_tickets):
+        self.id = str(voter_id)
+        self.name = name
+        self.num_claim_tickets = num_claim_tickets
+
+    def __repr__(self):
+        return self.name
+
+    def get_signature_contents(self, **kwargs):
+        return "{}:{}".format(str(self.id), self.name)
 
 
-class Node:
+class Ballot:
+    """Ballot for a specific election that can have many ballot items."""
+
+    def __init__(self, election):
+        self.election = election
+        self.items = dict()
+        self.finalized = False
+
+    def get_signature_contents(self, **kwargs):
+        """Returns unique representation of Ballot"""
+        return self.election + str(self.items)
+
+    def add_item(self, position, description, choices, max_choices):
+        if self.finalized:
+            return
+
+        # one unique position per election
+        self.items[position] = {
+            'description': description,
+            'choices': choices,
+            'max_choices': max_choices,
+            'selected': []  # tracks index(es) of selected choices
+        }
+
+    def fill_out(self, selections=None, **kwargs):
+        """
+        selections  pre-determined selections (used by simulation/adversaries)
+                      ex: {'President': [0], 'Vice President': [1]}
+
+        Returns whether or not ballot was filled out. This determines whether or not
+        a transaction will be created. 
+
+        Future enhancement: Implement retry mechanism, allowing ballots to be invalidated.
+        To do this, we would have to support invalidating claim tickets and allowing the
+        voter to claim another ticket in its stead.
+        """
+
+        if selections:
+            for position in selections:
+                self.select(position, selections[position])
+            return True
+
+        print("Ballot for {}".format(self.election))
+        for position in self.items:
+            metadata = self.items[position]
+            print ("{}: {}".format(position, metadata['description']))
+            for num, choice in enumerate(metadata['choices']):
+                print ("{}. {}".format(num+1, choice))
+
+            max_choices = metadata['max_choices']
+            if max_choices > 1:
+                msg = "Please enter your choice numbers, separated by commas (no more than {} selections): ".format(
+                    max_choices
+                )
+            else:
+                msg = "Please enter your choice number: "
+
+            user_input = input(msg)
+            user_input = user_input.split(",")[:max_choices]  # cap at max_choices
+            selection_indexes = []
+            for selection in user_input:
+                try:
+                    candidate = metadata['choices'][int(selection)-1]
+                    selection_indexes.append(int(selection)-1)
+                except (IndexError, ValueError):
+                    retry = True
+
+            # no valid selections were made
+            if not selection_indexes:
+                retry = True
+
+            selections = [metadata['choices'][i] for i in selection_indexes]
+            print("Your valid selections: {}".format(selections))
+            confirmation = utils.get_input_of_type(
+                "Enter 'y' to confirm choices or 'n' to invalidate ballot ",
+                str, allowed_inputs=['y', 'n', 'Y', 'N']
+            ).lower()
+            print()
+            if confirmation == 'n':
+                retry = True
+                return False
+            else:
+                self.select(position, selection_indexes)
+        return True    
+
+    def select(self, position, selected):
+        """
+        selected   list of selected index(es) for position
+        """
+        self.items[position]['selected'] = selected
+
+    def unselect(self, position, selected):
+        """Future work"""
+        pass
+
+    def clear(self):
+        """Wipes selections from ballot."""
+        for position in self.items:
+            self.items[position]['selected'] = []
+
+    def finalize(self):
+        """Finalizes ballot items."""
+        self.finalized = True
+
+    @staticmethod
+    def tally(ballots):
+        """
+        returns tally in format
+          {
+              'president': [{'Obama': 1}, {'Bloomberg': 2}],
+              'vice president': [{'Biden': 1}, {'Tusk': 2}]
+          }
+        """
+        result = {}
+
+        for ballot in ballots:
+            for position in ballot.items:
+                choices = ballot.items[position]['choices']
+                selected = ballot.items[position]['selected']
+                
+                if position not in result:
+                    result[position] = []
+                    for candidate in choices:
+                        result[position].append({candidate: 0})
+
+                for candidate_index in selected:
+                    candidate = choices[candidate_index]
+                    result[position][candidate_index][candidate] += 1
+        return result
+
+
+class Node(ConsensusParticipant):
     """Abstract class for Node that participates in a blockchain"""
     is_adversary = False
 
@@ -93,83 +238,7 @@ class Node:
         """Performs basic validation of transaction. Should be combined with any content-specific validation in child classes."""
         Transaction.validate_transaction(transaction)
 
-    def begin_consensus_round(self, nodes=None):
-        """
-        Args:
-            nodes  nodes to participate in consensus with. used to whitelist nodes
-                    when nodes with a different block hash are detected. defaults
-                    to entire network
-        """
-        if nodes:
-            try:
-                nodes.remove(self)
-            except ValueError as e:
-                print(e)
-        else:
-            nodes = self.node_mapping.values()
-        self.last_round_nodes = nodes
-        self.rejection_map = {}
-        self.send_nodes_transactions_for_consensus(nodes)
-
-    def send_nodes_transactions_for_consensus(self, nodes):
-        """Sends verified transactions to all nodes in the network specifically for the consensus round"""
-        for node in nodes:
-            node.check_transactions_for_consensus(self.verified_transactions)
-
-    def check_transactions_for_consensus(self, transactions):
-        """Validates a collection of transactions and adjusts each one's tally during the consensus round.
-        Args:
-            transactions            iterable of Transactions to check
-        """
-        for tx in transactions:
-            # TODO - check this logic...
-            if tx in self.transaction_tally:
-                self.transaction_tally[tx] = self.transaction_tally[tx] + 1
-            else:
-                # validate transaction and set tally accordingly
-                try:
-                    if tx not in self.verified_transactions:
-                        self.validate_transaction(tx)
-                    self.transaction_tally[tx] = 1
-                except Exception as e:
-                    self.rejection_map[tx] = str(e)
-                    self.transaction_tally[tx] = 0
-
-    def finalize_consensus_round(self):
-        """Finalizes block and resets state for next round"""
-        self.last_round_approvals.clear()
-        self.last_round_rejections.clear()
-        self.last_round_rejection_reasons = ''
-
-        # aggregate results
-        network_size = len(self.node_mapping.values()) + 1  # add itself
-        approved_transactions = []
-        rejected_transactions = []
-        for tx in self.transaction_tally:
-            tally = self.transaction_tally[tx]
-            if tally/network_size >= MINIMUM_AGREEMENT_PCT:
-                approved_transactions.append(tx)
-                self.last_round_approvals.add(tx)
-            else:
-                rejected_transactions.append(tx)
-                self.last_round_rejections.add(tx)
-                self.last_round_rejection_reasons = self.rejection_map.values()
-
-        # finalize block
-        self.blockchain.add_block(approved_transactions)
-
-        # reset round
-        self.transaction_tally = {}
-        for tx in approved_transactions:
-            try:
-                self.verified_transactions.remove(tx)
-            except KeyError:
-                pass
-            try:
-                self.rejected_transactions.remove(tx)
-            except KeyError:
-                pass
-
+    
     def is_node_in_network(self, public_key):
         """Returns whether or not public key is one of the recognized nodes, including itself.
         Args:
@@ -214,16 +283,6 @@ class BallotClaimTicket:
         except InvalidSignature:
             ticket.errors = "Invalid ballot claim ticket signature"
             raise InvalidSignature(ticket.errors)
-
-
-class KeyChangingNodeMixin(object):
-    """Injects faulty/adversary behavior in node so that it changes its 
-    key pair each time it signs something."""
-    is_adversary = True
-
-    def sign_message(self, message):
-        self.public_key, self._private_key = utils.get_key_pair()
-        return super().sign_message(message)
 
 
 class VoterAuthenticationBooth(Node):
@@ -294,31 +353,6 @@ class VoterAuthenticationBooth(Node):
         tx = VoterTransaction(voter, self, NOT_RETRIEVED_BALLOT, RETRIEVED_BALLOT)
         self.verified_transactions.add(tx)
         self.broadcast_transactions(tx)
-
-
-class UnrecognizedVoterAuthenticationBooth(KeyChangingNodeMixin,
-                                           VoterAuthenticationBooth):
-    is_adversary = True
-
-
-class AuthBypassVoterAuthenticationBooth(VoterAuthenticationBooth):
-    is_adversary = True
-    
-    def sign_message(self, message):
-        """Cannot access private key to actually sign"""
-        return message.encode()
-
-    def authenticate_voter(self, voter):
-        return True  # bypasses auth
-
-    def _voter_has_claim_tickets(self, voter_id):
-        return True  # allows user to retrieve unlimited claim tickets
-
-    def generate_ballot_claim_ticket(self, voter):
-        ticket = BallotClaimTicket(self)
-        # TODO: increase global counter
-        self.create_transaction(voter)
-        return ticket
 
 
 class VotingComputer(Node):
@@ -397,32 +431,6 @@ class VotingComputer(Node):
                 msg = 'Ballot for position {} has been tampered with! (extra candidate)'.format(position)
                 self.log(msg)
                 raise InvalidBallot(msg)
-
-
-class DOSVotingComputer(VotingComputer):
-    is_adversary = True
-
-    def check_transactions_for_consensus(self, txs):
-        pass  # doesn't vote on validity during consensus
-
-
-class InvalidBallotVotingComputer(VotingComputer):
-    """Voting Computer that allows the user to submit arbitrary candidates for 
-    arbitrary positions"""
-    is_adversary = True
-
-    def get_ballot(self):
-        """Overridden to make ballot filling flexible for user"""
-        flexible_ballot = FlexibleBallot(election=self.ballot.election)
-        for position in self.ballot.items:
-            metadata = self.ballot.items[position]
-            flexible_ballot.add_item(
-                position=position,
-                description=metadata['description'],
-                choices=deepcopy(metadata['choices']),  # create independent copy
-                max_choices=metadata['max_choices']
-            )
-        return flexible_ballot
 
 
 class Transaction:

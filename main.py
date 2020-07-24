@@ -1,7 +1,7 @@
 import logging
 from utils import get_input_of_type
-from votingprogram import VotingProgram, Simulation
-from base import (UnrecognizedVoterAuthenticationBooth, AuthBypassVoterAuthenticationBooth,
+from election import VotingProgram, Simulation
+from adversary import (UnrecognizedVoterAuthenticationBooth, AuthBypassVoterAuthenticationBooth,
     DOSVotingComputer, InvalidBallotVotingComputer)
 
 def main():
@@ -25,7 +25,7 @@ def main():
         5: {'description': 'Node broadcasting invalid transaction', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': UnrecognizedVoterAuthenticationBooth}},
         6: {'description': 'Adversarial node creating invalid claim tickets', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': AuthBypassVoterAuthenticationBooth}},
         7: {'description': 'Adversarial node not participating in consensus round', 'adversarial': True, 'kwargs': {'voting_node_adversary_class': DOSVotingComputer}},
-        8: {'description': 'Custom', 'adversarial': adversarial_mode}  # TODO - future work?
+        8: {'description': 'Custom', 'adversarial': adversarial_mode}  # TODO - future work
     }
     adversary_simulation_indexes = [k for k,v in simulation_map.items() if v['adversarial']]
     setup_kwargs = {}
@@ -82,8 +82,6 @@ def main():
 
     program = Simulation() if simulation_mode else VotingProgram()
     consensus_round_interval = 6 if simulation_mode else 30
-
-    # TODO: simulation supports a few types of adversaries and the regular voting program supports all
     
     print("Setting up election...")
     program.setup(
