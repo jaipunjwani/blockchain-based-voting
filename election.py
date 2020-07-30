@@ -9,6 +9,7 @@ from copy import copy, deepcopy
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from exceptions import NotEnoughBallotClaimTickets, UnknownVoter
+from consensus import ConsensusParticipant
 
 
 VOTER_ROLL_PATH = 'voter_roll.txt'
@@ -138,59 +139,10 @@ class VotingProgram:
             return True
         return False
 
-    def demonstrate_consensus(self, nodes, blockchain_name):
-        print()
-        print('Kicking off consensus round for {}'.format(blockchain_name))
-        # step 1 -- achieve consensus on last block hash (aggregate consensus stats)
-        hash_agreement = {}
-        for node in nodes:
-            h = node.blockchain.current_block.hash  # hash contains previous block header, which is signed by particular
-            if h in hash_agreement:
-                hash_agreement[h].append(node)
-            else:
-                hash_agreement[h] = [node]
-        num_hashes = len(hash_agreement.keys())
-        majority_hash = None
-        majority_nodes_len = 0
-
-        for h in hash_agreement:
-            nodes = hash_agreement[h]
-            num_nodes = len(nodes)
-
-            if not majority_hash:
-                majority_nodes_len = num_nodes
-                majority_hash = h
-
-            elif num_nodes > majority_nodes_len:
-                majority_nodes_len = num_nodes
-                majority_hash = h
-
-        if majority_hash:
-            nodes = hash_agreement[majority_hash]
-            for node in nodes:
-                node.begin_consensus_round(nodes=nodes.copy())
-
-            for node in nodes:
-                node.finalize_consensus_round()
-
-            # compile stats for each node per group
-            for node in nodes:
-                if not node.is_adversary:
-                    good_node = node
-                    break
-            node = good_node
-            num_nodes = len(nodes)
-
-            print('Consensus among {} nodes'.format(num_nodes))
-            print('Transactions approved: {}'.format(len(node.last_round_approvals)))
-            rejection_msg = 'Transactions rejected: {}'.format(len(node.rejection_map))
-            if len(node.last_round_rejections) > 0:
-                rejected_reasons = list(set(node.rejection_map.values()))
-                #TODO: message for consensus round summary seems to have state that is unreset (transaction reasons)
-                rejection_msg = '{} Reason(s): {}'.format(rejection_msg, rejected_reasons)
-            print(rejection_msg)
-        time.sleep(2)
-
+    def demonstrate_consensus(self):
+        ConsensusParticipant.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')
+        ConsensusParticipant.demonstrate_consensus(self.voting_computers, 'Ballot Blockchain') 
+        
     def display_header(self):
         mode = 'ADVERSARIAL MODE' if self.adversarial_mode else 'NORMAL MODE'
         print (mode)
@@ -438,8 +390,8 @@ class Simulation(VotingProgram):
             )
 
             if self.is_consensus_round():
-                self.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')
-                self.demonstrate_consensus(self.voting_computers, 'Ballot Blockchain')
+                self.demonstrate_consensus()
+
             utils.clear_screen()
             self.display_header()
 
@@ -449,8 +401,7 @@ class Simulation(VotingProgram):
         input('Press enter to see results.')
         utils.clear_screen()
 
-        self.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')
-        self.demonstrate_consensus(self.voting_computers, 'Ballot Blockchain')        
+        self.demonstrate_consensus()
         print("Election over! Results: ")
         self.display_results()
 

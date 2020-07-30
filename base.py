@@ -37,7 +37,7 @@ class Voter:
     def __repr__(self):
         return self.name
 
-    def get_signature_contents(self, **kwargs):
+    def get_unique_repr(self, **kwargs):
         return "{}:{}".format(str(self.id), self.name)
 
 
@@ -49,7 +49,7 @@ class Ballot:
         self.items = dict()
         self.finalized = False
 
-    def get_signature_contents(self, **kwargs):
+    def get_unique_repr(self, **kwargs):
         """Returns unique representation of Ballot"""
         return self.election + str(self.items)
 
@@ -269,14 +269,14 @@ class BallotClaimTicket:
         self.signature = self.node.sign_message(self.id)
         self.errors = ""
 
-    def get_signature_contents(self, **signature_kwargs):
+    def get_unique_repr(self, **signature_kwargs):
         return self.id
 
     @staticmethod
     def validate(ticket):
         try:
             utils.verify_signature(
-                ticket.get_signature_contents(),
+                ticket.get_unique_repr(),
                 ticket.signature, 
                 ticket.node.public_key
             )
@@ -453,11 +453,11 @@ class Transaction:
             signature_kwargs    key word arguments to control signature (e.g., signature of empty Ballot  vs. filled in)
         Raises:
             TypeError:          if transaction content is of unexpected type
-            AttributeError:     if content object not implement `get_signature_contents` method
+            AttributeError:     if content object not implement `get_unique_repr` method
             Exception:          if either old or new state is not in the `allowed_states`
         """
-        if getattr(content, 'get_signature_contents') is None:
-            raise AttributeError(str(content_class) + ' needs to implement method get_signature_contents')
+        if not getattr(content, 'get_unique_repr'):
+            raise AttributeError(str(content_class) + ' needs to implement method get_unique_repr')
         self.content = content
         self.signature_kwargs = signature_kwargs
         if previous_state in self.allowed_states and new_state in self.allowed_states:
@@ -469,12 +469,12 @@ class Transaction:
         self.timestamped = timestamped
         if timestamped:
             self.time = datetime.now()
-        self.signature = node.sign_message(self.get_signature_contents(**self.signature_kwargs))
+        self.signature = node.sign_message(self.get_unique_repr(**self.signature_kwargs))
 
     def __str__(self):
         return str(self.signature)
 
-    def get_signature_contents(self, **signature_kwargs):
+    def get_unique_repr(self, **signature_kwargs):
         """Produces unique string representation of transaction which is being signed. Adds timestamp if enabled.
         Note:
             Signature kwargs is currently needed for transactions that use Ballots. We create two transacions 
@@ -485,7 +485,7 @@ class Transaction:
         Args:
             signature_kwargs:       kwargs to control content signature
         """
-        str_list = [self.content.get_signature_contents(**signature_kwargs),
+        str_list = [self.content.get_unique_repr(**signature_kwargs),
                     self.previous_state,
                     self.new_state]
         if self.timestamped:
@@ -507,7 +507,7 @@ class Transaction:
             transaction         transaction to be validated
         """
         try:
-            utils.verify_signature(transaction.get_signature_contents(**transaction.signature_kwargs), transaction.signature, transaction.node.public_key)
+            utils.verify_signature(transaction.get_unique_repr(**transaction.signature_kwargs), transaction.signature, transaction.node.public_key)
         except InvalidSignature as e:
             public_key = transaction.node.public_key
             raise InvalidSignature('Invalid signature by public key: {}'.format(hash(public_key)))
@@ -520,11 +520,11 @@ class BallotTransaction(Transaction):
         self.ballot_claim_ticket = ballot_claim_ticket
         super().__init__(*args, **kwargs)
 
-    def get_signature_contents(self, **signature_kwargs):
-        signature_contents = super().get_signature_contents(**signature_kwargs)
+    def get_unique_repr(self, **signature_kwargs):
+        signature_contents = super().get_unique_repr(**signature_kwargs)
         return ":".join([
             signature_contents, 
-            self.ballot_claim_ticket.get_signature_contents(**signature_kwargs)
+            self.ballot_claim_ticket.get_unique_repr(**signature_kwargs)
         ])
 
 
@@ -534,7 +534,6 @@ class VoterTransaction(Transaction):
 
 class Block:
 
-        # TODO: am I even creating a block?
         def __init__(self, transactions, node, previous_block=None, genesis=False):
             if not genesis and not previous_block:
                 raise Exception('Previous block must be provided for all blocks except genesis')
@@ -546,23 +545,24 @@ class Block:
             if self.genesis:
                 self.state = {}
             else:
-                self.state = copy(self.previous_block.state)
+                # start off with previous state
+                self.state = copy(self.previous_block.state)  
             self.apply_transactions()
             self.time = datetime.now()
-            self.hash = self.get_signature_contents()  # TODO: apply hash to this string
+            self.hash = utils.get_str_hash(self.get_unique_repr())
             self.header = node.sign_message(self.hash)
 
         def apply_transactions(self):
             pass
 
-        def get_signature_contents(self, **signature_kwargs):
-            """TODO: make this state + previous_block"""
+        def get_unique_repr(self, **signature_kwargs):
             str_list = []
             for tx in self.transactions:
                 str_list.append(tx.signature.hex())
             
             if self.previous_block:
-                str_list.append(self.previous_block.hash)  # use hash rather than individually signed hash
+                # we use hash rather than header b/c header is individually signed hash so it's different per node
+                str_list.append(self.previous_block.hash)
 
             str_list.append(utils.get_formatted_time_str(self.time))
             str_list.append(str(self.genesis))
@@ -612,7 +612,9 @@ class Blockchain:
         self.post_add_block()
 
     def post_add_block(self):
-        """Signal for implementing behavior after adding a new block (such as updating global values)"""
+        """
+        Callback for implementing behavior after adding a new block (such as updating global values)
+        """
         pass
 
 

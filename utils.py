@@ -64,6 +64,12 @@ def verify_signature(message, signature, public_key):
         raise Exception('Unexpected error: {}'.format(e))
 
 
+def get_str_hash(s):
+    m = hashlib.sha256()
+    m.update(s.encode())
+    return m.hexdigest()
+
+
 def get_formatted_time_str(date_obj):
     """Returns a string representation of a date object as Y-M-D H:M
     Args:

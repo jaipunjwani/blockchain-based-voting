@@ -94,6 +94,18 @@ class ConsensusParticipant:
             except KeyError:
                 pass
 
+    def get_nodes_in_agreement(self):
+        """
+        Gets all nodes in agreement with this node's perception of the blockchain.
+        """
+        nodes_in_agreement = []
+        nodes = self.node_mapping.values()
+        for node in nodes:
+            # compare hashes rather than header b/c hash is unique repr that is the same for a given block
+            if self.blockchain.current_block.hash == node.blockchain.current_block.hash:
+                nodes_in_agreement.append(node)
+        return nodes_in_agreement
+
     @staticmethod
     def demonstrate_consensus(nodes, blockchain_name):
         """
@@ -125,6 +137,7 @@ class ConsensusParticipant:
                 majority_nodes_len = num_nodes
                 majority_hash = h
 
+        # step 2 -- kick off consensus round only for nodes that agree with the majority
         if majority_hash:
             nodes = hash_agreement[majority_hash]
             for node in nodes:
