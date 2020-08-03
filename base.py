@@ -187,10 +187,7 @@ class Node(ConsensusParticipant):
         self._private_key = private_key
         self.verified_transactions = set()
         self.rejected_transactions = set()  # transactions that failed validation, but will be included in next round
-        self.transaction_tally = dict()  # holds tally for each transaction during consensus round
-        self.last_round_approvals = set()
-        self.last_round_rejections = set()
-        self.rejection_map = {}
+        super().__init__()  # ConsensusParticipant init
 
     def log(self, message):
         logger.info(message, extra={'public_key': hash(self.public_key)})

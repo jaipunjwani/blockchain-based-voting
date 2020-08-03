@@ -18,6 +18,12 @@ class ConsensusParticipant:
         aggregate approved transactions into new block
     """
 
+    def __init__(self):
+        self.transaction_tally = dict()  # holds tally for each transaction during consensus round
+        self.last_round_approvals = set()
+        self.last_round_rejections = set()
+        self.transaction_rejection_reasons = {}  # tx: 'error msg'
+
     def get_nodes_in_agreement(self):
         """
         Gets all nodes in agreement with this node's perception of the blockchain.
@@ -44,8 +50,7 @@ class ConsensusParticipant:
                 pass
         else:
             nodes = self.node_mapping.values()
-        self.last_round_nodes = nodes  # future work: will help detect difference in nodes between previous round
-        self.rejection_map = {}
+        self.transaction_rejection_reasons = {}
         self.broadcast_transactions_for_consensus(nodes)
 
     def broadcast_transactions_for_consensus(self, nodes):
@@ -66,7 +71,7 @@ class ConsensusParticipant:
                     self.validate_transaction(tx)
                 self.transaction_tally[tx] = 1
             except Exception as e:
-                self.rejection_map[tx] = str(e)
+                self.transaction_rejection_reasons[tx] = str(e)
                 self.transaction_tally[tx] = 0
 
     def broadcast_transaction_tally(self, nodes):
@@ -83,36 +88,26 @@ class ConsensusParticipant:
         """Finalizes block and resets state for next round"""
         self.last_round_approvals.clear()
         self.last_round_rejections.clear()
-        self.last_round_rejection_reasons = ''
 
         # aggregate results
         network_size = len(self.node_mapping.values()) + 1  # add itself
-        approved_transactions = []
-        rejected_transactions = []
         for tx in self.transaction_tally:
             tally = self.transaction_tally[tx]
             if tally/network_size >= MINIMUM_AGREEMENT_PCT:
-                approved_transactions.append(tx)
                 self.last_round_approvals.add(tx)
             else:
-                rejected_transactions.append(tx)
                 self.last_round_rejections.add(tx)
-                self.last_round_rejection_reasons = self.rejection_map.values()
 
         # finalize block
-        self.blockchain.add_block(approved_transactions)
+        self.blockchain.add_block(list(self.last_round_approvals))
 
         # reset round
         self.transaction_tally = {}
-        for tx in approved_transactions:
-            try:
+        for tx in self.last_round_approvals:
+            if tx in self.verified_transactions:
                 self.verified_transactions.remove(tx)
-            except KeyError:
-                pass
-            try:
+            if tx in self.rejected_transactions:
                 self.rejected_transactions.remove(tx)
-            except KeyError:
-                pass
 
     @staticmethod
     def demonstrate_consensus(nodes, blockchain_name):
@@ -140,7 +135,7 @@ class ConsensusParticipant:
             # step 4 -- commit block of valid transactions
             node.finalize_consensus_round()
 
-        # extract stats from any good node, which will have the same block as any other good node
+        # extract stats from any good node, which will have the same state due to the same behavior as any other good node
         for node in nodes:
             if not node.is_adversary:
                 good_node = node  
@@ -150,9 +145,9 @@ class ConsensusParticipant:
 
         print('Consensus among {} nodes'.format(num_nodes))
         print('Transactions approved: {}'.format(len(node.last_round_approvals)))
-        rejection_msg = 'Transactions rejected: {}'.format(len(node.rejection_map))
+        rejection_msg = 'Transactions rejected: {}'.format(len(node.transaction_rejection_reasons))
         if len(node.last_round_rejections) > 0:
-            rejected_reasons = list(set(node.rejection_map.values()))
+            rejected_reasons = list(set(node.transaction_rejection_reasons.values()))
             rejection_msg = '{} Reason(s): {}'.format(rejection_msg, rejected_reasons)
         print(rejection_msg)
         time.sleep(2)
