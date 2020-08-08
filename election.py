@@ -121,12 +121,10 @@ class VotingProgram:
             if self.is_election_over():
                 break
             if self.is_consensus_round():
-                self.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')
-                self.demonstrate_consensus(self.voting_computers, 'Ballot Blockchain')
+                self.demonstrate_consensus()
             input("Press any key to continue")
 
-        self.demonstrate_consensus(self.voter_authentication_booths, 'Voter Blockchain')
-        self.demonstrate_consensus(self.voting_computers, 'Ballot Blockchain')        
+        self.demonstrate_consensus()        
         print("Election over! Results: ")
         self.display_results()
 
