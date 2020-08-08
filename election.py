@@ -266,13 +266,12 @@ class VotingProgram:
 
         # vote
         voting_computer = random.choice(self.voting_computers)
-        voting_computer.vote(ballot_claim_ticket, **kwargs)
+        success = voting_computer.vote(ballot_claim_ticket, **kwargs)
 
-        # TODO: local global counter
-        self.num_voters_voted+=1
+        if success:
+            self.num_voters_voted+=1
 
     def is_election_over(self):
-        # TODO: counter increases even if vote fails..rectify by making node.vote() call throw exception and catching it
         # check for consensus among global counters from all nodes
         if self.num_voters_voted >= len(self.voter_roll):
             return True

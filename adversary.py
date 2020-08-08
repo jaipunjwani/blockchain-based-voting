@@ -86,7 +86,6 @@ class AuthBypassVoterAuthenticationBooth(VoterAuthenticationBooth):
 
     def generate_ballot_claim_ticket(self, voter):
         ticket = BallotClaimTicket(self)
-        # TODO: increase global counter
         self.create_transaction(voter)
         return ticket
 

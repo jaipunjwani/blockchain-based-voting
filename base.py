@@ -234,7 +234,6 @@ class Node(ConsensusParticipant):
     def validate_transaction(self, transaction):
         """Performs basic validation of transaction. Should be combined with any content-specific validation in child classes."""
         Transaction.validate_transaction(transaction)
-
     
     def is_node_in_network(self, public_key):
         """Returns whether or not public key is one of the recognized nodes, including itself.
@@ -339,7 +338,7 @@ class VoterAuthenticationBooth(Node):
                     'Voter {} (ID {}) does not have enough claim tickets'.format(voter.name, voter.id)
                 )
             ticket = BallotClaimTicket(self)
-            # TODO: increase global counter
+
             self.create_transaction(voter)
             return ticket
         except Exception as e:
@@ -372,7 +371,6 @@ class VotingComputer(Node):
             **signature_kwargs
         )
         self.verified_transactions.add(tx)
-        # TODO: update global counters
         self.broadcast_transactions(tx)
 
     def vote(self, ballot_claim_ticket, **kwargs):
@@ -381,7 +379,7 @@ class VotingComputer(Node):
             self.validate_ballot_claim_ticket(ballot_claim_ticket)
         except Exception as e:
             print(e)
-            return
+            return False
 
         # voting: retrieve and fill out ballot
         ballot = self.get_ballot()
@@ -390,6 +388,8 @@ class VotingComputer(Node):
         # post-voting: validate ballot and create tx
         if ballot_filled_out:
             self.create_transaction(ballot_claim_ticket, ballot)
+            return True
+        return False
 
     def validate_ballot_claim_ticket(self, ballot_claim_ticket):
         BallotClaimTicket.validate(ballot_claim_ticket)
@@ -616,7 +616,6 @@ class Blockchain:
 
 
 class VoterBlockchain(Blockchain):
-    # TODO: add global counters
     block_class = VoterBlock
 
     def create_genesis_block(self, voter_roll):
@@ -629,9 +628,11 @@ class VoterBlockchain(Blockchain):
 
 
 class BallotBlockchain(Blockchain):
-    # TODO: add global counters
-    ballot_claim_tickets = []
     block_class = BallotBlock
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ballot_claim_tickets = []
 
     def create_genesis_block(self, empty_ballot):
         self.current_block = self.block_class([], self.node, genesis=True)
