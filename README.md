@@ -16,4 +16,4 @@ Python 3.5+, pip
 
 ### How to Run
 pip install the dependencies from `requirements.txt` (ideally in a virtual environment).
-Then run `python main.py`. To customize the software for your own voter roll & ballot, modify `voter_roll.json` and `ballot_config.json`, respectively.
+Then run `python main.py`. To customize the software for your own voter roll & ballot, modify `configs/voter_roll.json` and `configs/ballot_config.json`, respectively.
