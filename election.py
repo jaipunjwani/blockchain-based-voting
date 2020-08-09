@@ -324,10 +324,7 @@ class Simulation(VotingProgram):
     candidate_one_percentage = 0.6
     candidate_two_percentage = 1 - candidate_one_percentage
     voter_ballot_selections = {}
-    ballot_item_weights = {}  # President: [0.6, 0.4] --> indicates weight of each item
-
-    def validate_config(self):
-        pass
+    ballot_item_weights = {}  # President: [0.6, 0.4] --> indicates weight of each candidate
 
     def load_voter_roll(self):
         self.voter_roll = []
@@ -354,12 +351,6 @@ class Simulation(VotingProgram):
                     random_index = random.randint(0, len(choices)-1)
                     selected = [random_index]
 
-                '''
-                if int(voter_id)/self.num_voters <= self.candidate_one_percentage:
-                    selected = [0]
-                else:
-                    selected = [1]
-                '''
                 self.voter_ballot_selections[voter_id][position] = selected
 
     def setup(self, *args, 
