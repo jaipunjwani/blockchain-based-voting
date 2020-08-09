@@ -16,15 +16,16 @@ def main():
     adversarial_mode = True if adversarial_mode == '-1' else False
 
     simulation_map = {
-        1: {'description': 'Valid voters casting valid votes', 'adversarial': False},
-        2: {'description': 'Unknown voter attempting to cast vote', 'adversarial': False, 'kwargs': {'num_unregistered_voters': 10}},
-        3: {'description': 'Valid voter attempting to cast extra vote', 'adversarial': False, 'kwargs': {'num_double_voting_voters': 5}},  # voter will vote twice so effectively 10 voters
+        1: {'description': 'Valid voters casting valid votes', 'adversarial': False, 'kwargs': {'ballot_config_path': 'configs/simulation/simulation_1_ballot_config.json'}},
+        2: {'description': 'Unknown voter attempting to cast vote', 'adversarial': False, 'kwargs': {'num_unregistered_voters': 10, 'ballot_config_path': 'configs/simulation/simulation_2_ballot_config.json'}},
+        3: {'description': 'Valid voter attempting to cast extra vote', 'adversarial': False, 'kwargs': {'num_double_voting_voters': 5, 'ballot_config_path': 'configs/simulation/simulation_3_ballot_config.json'}},  # voter will vote twice so effectively 10 voters
         # note about 4: this isn't necessarily an adversarial scenario, but we choose to treat it as one here.
         4: {'description': 'Valid voters attempting to cast invalid vote', 'adversarial': True, 'kwargs': {'voting_node_adversary_class': InvalidBallotVotingComputer, 
-                                                                                                           'additional_selections': [{'position': 'FakePosition', 'candidate': 'Jai Punjwani'}]}},
-        5: {'description': 'Node broadcasting invalid transaction', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': UnrecognizedVoterAuthenticationBooth}},
-        6: {'description': 'Adversarial node creating invalid claim tickets', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': AuthBypassVoterAuthenticationBooth}},
-        7: {'description': 'Adversarial node not participating in consensus round', 'adversarial': True, 'kwargs': {'voting_node_adversary_class': DOSVotingComputer}},
+                                                                                                           'additional_selections': [{'position': 'FakePosition', 'candidate': 'Jai Punjwani'}],
+                                                                                                           'ballot_config_path': 'configs/simulation/simulation_4_ballot_config.json'}},
+        5: {'description': 'Node broadcasting invalid transaction', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': UnrecognizedVoterAuthenticationBooth, 'ballot_config_path': 'configs/simulation/simulation_5_ballot_config.json'}},
+        6: {'description': 'Adversarial node creating invalid claim tickets', 'adversarial': True, 'kwargs': {'voter_node_adversary_class': AuthBypassVoterAuthenticationBooth, 'ballot_config_path': 'configs/simulation/simulation_6_ballot_config.json'}},
+        7: {'description': 'Adversarial node not participating in consensus round', 'adversarial': True, 'kwargs': {'voting_node_adversary_class': DOSVotingComputer, 'ballot_config_path': 'configs/simulation/simulation_7_ballot_config.json'}},
         8: {'description': 'Custom', 'adversarial': adversarial_mode}  # TODO - future work
     }
     adversary_simulation_indexes = [k for k,v in simulation_map.items() if v['adversarial']]
@@ -67,7 +68,7 @@ def main():
 
         for i, blockchain_key in enumerate([voter_node_key, voting_node_key]):
             blockchain_name = blockchain_names[blockchain_key]
-            _input = input('Enter {} for {} or anything else to skip.\n'.format(i, blockchain_name))
+            _input = input('Enter {} for a {} adversary or anything else to skip.\n'.format(i, blockchain_name))
             if _input == str(i):
                 for index, adversary_class in enumerate(adversary_classes[blockchain_key]):
                     print ('({}) {}'.format(index, adversary_class.__name__))

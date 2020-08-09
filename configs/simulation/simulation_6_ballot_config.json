@@ -4,12 +4,18 @@
         "President": {    
             "description": "Head of executive branch",
             "choices": ["Candidate 1", "Candidate 2"],
-            "max_choices": 1
+            "max_choices": 1,
+            "simulation": {
+                "weights": [0.6, 0.4]
+            }
         },
         "Vice President": {
             "description": "Executive right below President",
             "choices": ["VP 1", "VP 2"],
-            "max_choices": 1
+            "max_choices": 1,
+            "simulation": {
+                "weights": [0.6, 0.4]
+            }
         }
     }
 }
