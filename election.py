@@ -8,11 +8,12 @@ from base import (VotingComputer, VoterAuthenticationBooth, Voter, Ballot)
 from copy import copy, deepcopy
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
-from exceptions import NotEnoughBallotClaimTickets, UnknownVoter
+from exceptions import NotEnoughBallotClaimTickets, UnknownVoter, BadConfiguration
 from consensus import ConsensusParticipant
 
 
-VOTER_ROLL_PATH = 'voter_roll.txt'
+VOTER_ROLL_PATH = 'configs/voter_roll.json'
+BALLOT_CONFIG_PATH = 'configs/ballot_config.json'
 LOG_FILE_PATH = 'logs/node.log'
 
 
@@ -36,7 +37,8 @@ def get_pki(nodes):
 
 
 class VotingProgram:
-    path = VOTER_ROLL_PATH
+    voter_roll_path = VOTER_ROLL_PATH
+    ballot_config_path = BALLOT_CONFIG_PATH
     num_voters_voted = 0
 
     def setup(self, 
@@ -61,23 +63,8 @@ class VotingProgram:
             if voting_node_adversary_class:
                 self.total_voting_node_adversarial_nodes = total_adversarial_nodes
 
-        # set up election with ballot template
-        self.ballot = Ballot(election='U.S. 2020 Federal Election')
-        self.ballot.add_item(
-            position='President', 
-            description='Head of executive branch', 
-            choices=['Mike Bloomberg(D)', 'Donald Trump(R)'], 
-            max_choices=1
-        )
-        self.ballot.add_item(
-            position='Vice President',
-            description='Executive right below President',
-            choices=['Joe Biden(D)', 'Mike Pence(R)'],
-            max_choices=1
-        )
-        self.ballot.finalize()
-
-        # load voter roll from file/configuration
+        # load ballot & voter roll configuration
+        self.load_ballot_config()
         self.load_voter_roll()
 
         # initialize regular nodes
@@ -106,8 +93,6 @@ class VotingProgram:
         for node in self.voter_authentication_booths:
             node.set_node_mapping(copy(voter_auth_nodes_pki))
 
-        # initialize blockchain with appropriate content?
-
     def begin_program(self):
         self.last_time = datetime.now()
         continue_program = True
@@ -124,7 +109,7 @@ class VotingProgram:
                 self.demonstrate_consensus()
             input("Press any key to continue")
 
-        self.demonstrate_consensus()        
+        self.demonstrate_consensus()
         print("Election over! Results: ")
         self.display_results()
 
@@ -296,7 +281,7 @@ class VotingProgram:
         voter_roll = []
         voter_id = 1
 
-        with open(self.path, 'r') as file:
+        with open(self.voter_roll_path, 'r') as file:
             voter_roll_dict = json.load(file)
             for voter in voter_roll_dict:
                 name = voter['name'].strip().lower()  # use lowercase for simplicity
@@ -305,9 +290,32 @@ class VotingProgram:
                     voter_roll.append(Voter(voter_id, name, num_claim_tickets))
                     voter_id += 1
         print ("Registered voters from {}: {}".format(
-            self.path, voter_roll)
+            self.voter_roll_path, voter_roll)
         )
         self.voter_roll = voter_roll
+
+    def load_ballot_config(self):
+        with open(self.ballot_config_path, 'r') as file:
+            ballot_config_dict = json.load(file)
+            ballot = Ballot(election=ballot_config_dict['election'])
+
+            for position, metadata in ballot_config_dict['items'].items():
+                simulation_data = metadata.pop('simulation', None)
+                ballot.add_item(position=position, **metadata)
+
+                # special logic for simulation mode
+                if simulation_data and hasattr(self, 'ballot_item_weights'):
+                    weights = simulation_data['weights']
+
+                    if len(weights) != len(metadata['choices']):
+                        raise BadConfiguration('Simulation weights length must match choices length')
+                    if sum(weights) != 1:
+                        raise BadConfiguration('Simulation weights must add up to 1')
+
+                    self.ballot_item_weights[position] = weights
+            
+            ballot.finalize()
+            self.ballot = ballot
 
 
 class Simulation(VotingProgram):
@@ -316,6 +324,10 @@ class Simulation(VotingProgram):
     candidate_one_percentage = 0.6
     candidate_two_percentage = 1 - candidate_one_percentage
     voter_ballot_selections = {}
+    ballot_item_weights = {}  # President: [0.6, 0.4] --> indicates weight of each item
+
+    def validate_config(self):
+        pass
 
     def load_voter_roll(self):
         self.voter_roll = []
@@ -327,11 +339,27 @@ class Simulation(VotingProgram):
             # preset voter selections for simulation
             self.voter_ballot_selections[voter_id] = {}
             for position in self.ballot.items:
-                metadata = self.ballot.items[position]
+                weights = self.ballot_item_weights.get(position)
+                if weights:
+                    voter_bracket = 0
+                    for i, weight in enumerate(weights):
+                        voter_bracket += self.num_voters * weight
+                        if int(voter_id) <= voter_bracket:
+                            selected = [i]
+                            break
+                
+                else:
+                    # randomize vote of candidate
+                    choices = self.ballot.items[position]['choices']
+                    random_index = random.randint(0, len(choices)-1)
+                    selected = [random_index]
+
+                '''
                 if int(voter_id)/self.num_voters <= self.candidate_one_percentage:
                     selected = [0]
                 else:
                     selected = [1]
+                '''
                 self.voter_ballot_selections[voter_id][position] = selected
 
     def setup(self, *args, 

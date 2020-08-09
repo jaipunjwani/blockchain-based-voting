@@ -7,6 +7,10 @@ class BaseException(Exception):
         super().__init__(*args, **kwargs)
 
 
+class BadConfiguration(BaseException):
+    default_message = 'Bad configuration. Please check .json files'
+
+
 class NotEnoughBallotClaimTickets(BaseException):
     default_message = 'You do not have enough claim ticket(s) left'
 
