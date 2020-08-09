@@ -37,8 +37,6 @@ def get_pki(nodes):
 
 
 class VotingProgram:
-    voter_roll_path = VOTER_ROLL_PATH
-    ballot_config_path = BALLOT_CONFIG_PATH
     num_voters_voted = 0
 
     def setup(self, 
@@ -46,7 +44,9 @@ class VotingProgram:
               consensus_round_interval=DEFAULT_CONSENSUS_ROUND_INTERVAL,
               voter_node_adversary_class=None,
               voting_node_adversary_class=None,
-              total_nodes=50):
+              total_nodes=50,
+              voter_roll_path=VOTER_ROLL_PATH,
+              ballot_config_path=BALLOT_CONFIG_PATH):
         self.adversarial_mode = adversarial_mode
         self.consensus_round_interval = consensus_round_interval
         self.total_nodes = total_nodes
@@ -64,6 +64,8 @@ class VotingProgram:
                 self.total_voting_node_adversarial_nodes = total_adversarial_nodes
 
         # load ballot & voter roll configuration
+        self.voter_roll_path = voter_roll_path
+        self.ballot_config_path = ballot_config_path
         self.load_ballot_config()
         self.load_voter_roll()
 
