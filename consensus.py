@@ -4,8 +4,9 @@ from constants import MINIMUM_AGREEMENT_PCT
 
 class ConsensusParticipant:
     """
-    Mixin-style class that is used with Nodes to utilize our consensus algorithm, which is based on
-    Ripple Protocol Consensus Algorithm (RPCA). Our algorithm can be summarized as the following:
+    Mixin-style class that is used with Nodes to utilize our consensus algorithm, which is inspired by
+    parts of Practical Byzantine Fault Tolerance (PBFT) and the Ripple Protocol Consensus Algorithm (RPCA). 
+    Our algorithm can be summarized as the following:
 
     For all nodes in network:
         broadcast hash of previous block

@@ -1,5 +1,5 @@
 # important values
-MINIMUM_AGREEMENT_PCT = 0.8  # required consensus for blockchain approval
+MINIMUM_AGREEMENT_PCT = 0.67  # required consensus for blockchain approval
 DEFAULT_CONSENSUS_ROUND_INTERVAL = 30  # consensus takes place every X seconds
 
 # macros
