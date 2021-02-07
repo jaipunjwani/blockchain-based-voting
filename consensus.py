@@ -62,14 +62,27 @@ class ConsensusParticipant:
     def validate_transactions_for_consensus(self, transactions):
         """
         Validates a collection of transactions and votes on the validity of each during the consensus round.
+        Resolves conflicting transactions by accepting one with earlier timestamp.
         Args:
             transactions            iterable of Transactions to check
         """
+        transaction_reprs = {}
         for tx in transactions:
             # validate transaction if not already done so and set tally accordingly
             try:
                 if tx not in self.verified_transactions:
                     self.validate_transaction(tx)
+
+                # transaction is valid on its own. Now compare to other transactions and find conflicting ones.
+                # resolve conflict by accepting transaction with earlier timestamp
+                tx_repr = tx.get_unique_repr()
+                if tx_repr in transaction_reprs:
+                    conflicting_tx = transaction_reprs[tx_repr]
+                    if tx.time > conflicting_tx.time:
+                        raise Exception('Conflicting transaction with earlier timestamp found.')
+                else:
+                    transaction_reprs[tx_repr] = tx
+
                 self.transaction_tally[tx] = 1
             except Exception as e:
                 self.transaction_rejection_reasons[tx] = str(e)
@@ -142,7 +155,7 @@ class ConsensusParticipant:
                 good_node = node  
                 break
         node = good_node
-        num_nodes = len(node.get_nodes_in_agreement())
+        num_nodes = len(node.get_nodes_in_agreement()) + 1  # peers + self
 
         print('Consensus among {} nodes'.format(num_nodes))
         print('Transactions approved: {}'.format(len(node.last_round_approvals)))

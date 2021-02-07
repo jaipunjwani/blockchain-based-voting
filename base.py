@@ -208,7 +208,7 @@ class Node(ConsensusParticipant):
     def broadcast_transactions(self, *transactions):
         """Broadcasts transactions to other nodes"""
         for node in self.node_mapping.values():
-            for tx in transactions:
+            for tx in transactions:                
                 node.add_transaction(tx)
 
     def add_transaction(self, transaction):
@@ -472,8 +472,8 @@ class Transaction:
         return str(self.signature)
 
     def get_unique_repr(self, **signature_kwargs):
-        """Produces unique string representation of transaction which is being signed. Adds timestamp if enabled.
-        Note:
+        """Produces unique string representation of transaction which is being signed.
+
             Signature kwargs is currently needed for transactions that use Ballots. We create two transacions 
             involving ballots: (1) a transaction when a ballot is issued, and (2) a transaction when it is used.
             Both transactions hold a reference to the same ballot object, which is filled out before the second
@@ -482,11 +482,10 @@ class Transaction:
         Args:
             signature_kwargs:       kwargs to control content signature
         """
+        signature_kwargs = signature_kwargs or self.signature_kwargs
         str_list = [self.content.get_unique_repr(**signature_kwargs),
                     self.previous_state,
                     self.new_state]
-        if self.timestamped:
-            str_list.append(self.get_time_str())
         return ":".join(str_list)
 
     def get_time_str(self):
