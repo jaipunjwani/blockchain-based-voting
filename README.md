@@ -15,7 +15,7 @@ The system allows users to configure their own voter roll and ballot with multip
 - logging (machine logs emulate realistic system messages that is part of the system's auditing)
 
 ### Requirements
-Python 3.5+, pip
+Docker OR Python 3.5+ & pip
 
 ### How to Run
 You can use `docker` to run this application. See [docker instructions](https://github.com/jaipunjwani/blockchain-based-voting/blob/master/README.Docker.md) for more.
