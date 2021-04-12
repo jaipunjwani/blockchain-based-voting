@@ -1,4 +1,7 @@
 # A Blockchain-based Electronic Voting System
+### Publication
+The work in this prototype complements research that Dr. Kees Leune (Adelphi University) and I have done. Our [work](https://ledgerjournal.org/ojs/ledger/article/view/199) was published by Ledger Journal in March 2021.
+
 ### Description
 This is a blockchain-inspired electronic voting system that demonstrates how a blockchain architecture can be used to make the voting process more reliable. It keeps track of voters that have been authenticated as well as ballots that are cast in two separate, unlinked blockchains. This preserves voter anonymity and achieves greater election integrity using an "immutable" audit trail. 
 
@@ -15,5 +18,7 @@ The system allows users to configure their own voter roll and ballot with multip
 Python 3.5+, pip
 
 ### How to Run
+You can use `docker` to run this application. See [docker instructions](https://github.com/jaipunjwani/blockchain-based-voting/blob/master/README.Docker.md) for more.
+
 pip install the dependencies from `requirements.txt` (ideally in a virtual environment).
 Then run `python main.py`. To customize the software for your own voter roll & ballot, modify `configs/voter_roll.json` and `configs/ballot_config.json`, respectively.
